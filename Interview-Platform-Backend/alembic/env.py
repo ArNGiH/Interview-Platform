@@ -5,6 +5,8 @@ from sqlalchemy import pool
 from app.core.database import Base
 from app.models.user import User
 from app.models.interview_session import InterviewSession
+from app.models.resume import Resume
+from app.models.resume_chunk import ResumeChunk
 
 from alembic import context
 
