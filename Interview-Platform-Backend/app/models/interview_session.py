@@ -31,6 +31,12 @@ class InterviewSession(Base):
 
     role = Column(String, nullable=False)
 
+    resume_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("resumes.id"),
+    nullable=True
+)
+
     experience_level = Column(String, nullable=False)
 
     difficulty = Column(String, nullable=False)
