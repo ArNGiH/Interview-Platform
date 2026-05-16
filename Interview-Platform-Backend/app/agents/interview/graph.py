@@ -1,21 +1,29 @@
 from functools import partial
+
 from langgraph.graph import (
     StateGraph,
     END
 )
+
 from langgraph.checkpoint.memory import (
     MemorySaver
 )
+
 from app.agents.interview.state import (
     InterviewState
 )
+
 from app.agents.interview.nodes import (
     retrieve_resume_context_node,
+    evaluate_candidate_answer_node,
+    question_strategy_node,
     generate_interview_question_node,
     persist_interview_state_node
 )
 
+
 memory = MemorySaver()
+
 
 def build_interview_graph(db):
 
@@ -29,6 +37,16 @@ def build_interview_graph(db):
             retrieve_resume_context_node,
             db=db
         )
+    )
+
+    graph_builder.add_node(
+        "evaluate_candidate_answer",
+        evaluate_candidate_answer_node
+    )
+
+    graph_builder.add_node(
+        "question_strategy",
+        question_strategy_node
     )
 
     graph_builder.add_node(
@@ -50,6 +68,16 @@ def build_interview_graph(db):
 
     graph_builder.add_edge(
         "retrieve_resume_context",
+        "evaluate_candidate_answer"
+    )
+
+    graph_builder.add_edge(
+        "evaluate_candidate_answer",
+        "question_strategy"
+    )
+
+    graph_builder.add_edge(
+        "question_strategy",
         "generate_interview_question"
     )
 

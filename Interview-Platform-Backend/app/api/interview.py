@@ -11,11 +11,15 @@ from app.schemas.interview_schema import (
 from app.schemas.interview_schema import (
     StartInterviewRequest
 )
-
+from app.schemas.interview_schema import (
+    InterviewChatRequest
+)
 from app.services.interview_orchestrator_service import (
     start_interview
 )
-
+from app.services.interview_chat_service import (
+    continue_interview_chat
+)
 from app.services.interview_service import (
     create_interview_session
 )
@@ -53,6 +57,20 @@ def start_interview_api(
         interview_id=str(
             payload.interview_id
         )
+    )
+
+    return response
+
+@router.post("/chat")
+def interview_chat(
+    payload: InterviewChatRequest,
+    db: Session = Depends(get_db)
+):
+
+    response = continue_interview_chat(
+        db=db,
+        interview_id=payload.interview_id,
+        user_message=payload.message
     )
 
     return response

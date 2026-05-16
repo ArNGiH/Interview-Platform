@@ -21,5 +21,8 @@ class InterviewChatRequest(BaseModel):
 
 
 class StartInterviewRequest(BaseModel):
-
     interview_id: UUID
+
+class InterviewChatRequest(BaseModel):
+    interview_id: str
+    message: str

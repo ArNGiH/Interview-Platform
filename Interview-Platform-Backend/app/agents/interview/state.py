@@ -14,6 +14,8 @@ class InterviewState(TypedDict):
     latest_user_message: Optional[str]
     current_question: Optional[str]
     question_count: int
+    candidate_evaluation: dict | None
+    question_strategy: dict | None
     interview_role: str
     experience_level: str
     interview_type: str
