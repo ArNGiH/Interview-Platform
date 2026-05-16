@@ -2,7 +2,7 @@ from time import perf_counter
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from pgvector.sqlalchemy import cosine_distance
+from pgvector.sqlalchemy import Vector
 
 from app.core.logger import logger
 from app.models.resume_chunk import ResumeChunk
@@ -43,11 +43,10 @@ def retrieve_relevant_resume_chunks(
             ResumeChunk.resume_id == resume_id
         )
         .order_by(
-            cosine_distance(
-                ResumeChunk.embedding,
-                query_embedding
-            )
+        ResumeChunk.embedding.cosine_distance(
+            query_embedding
         )
+    )
         .limit(top_k)
     )
 
