@@ -93,6 +93,10 @@ def continue_interview_chat(
             else None
         ),
 
+        "difficulty": (
+            interview_session.difficulty
+        ),
+
         "retrieved_chunks": [],
 
         "latest_user_message": (

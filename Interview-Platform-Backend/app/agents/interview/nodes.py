@@ -75,35 +75,6 @@ def _usage_metadata(response):
     )
 
 
-def _parse_strategy_response(
-    response_text: str
-):
-
-    strategy_match = re.search(
-        r"Strategy:\s*([A-Z_]+)",
-        response_text or "",
-        re.IGNORECASE
-    )
-
-    reason_match = re.search(
-        r"Reason:\s*(.+)",
-        response_text or "",
-        re.IGNORECASE | re.DOTALL
-    )
-
-    strategy = (
-        strategy_match.group(1).upper()
-        if strategy_match
-        else "UNPARSED"
-    )
-
-    reason = (
-        reason_match.group(1).strip()
-        if reason_match
-        else ""
-    )
-
-    return strategy, reason
 
 
 def generate_interview_intro_node(
@@ -411,20 +382,24 @@ def generate_interview_question_node(
     )
 
     strategy_text = (
-        question_strategy.get(
-            "strategy",
+    question_strategy.get(
+            "strategy_type",
             ""
         )
     )
 
     prompt = INTERVIEW_SYSTEM_PROMPT.format(
-        retrieved_context=retrieved_context,
-        previous_question=previous_question,
-        candidate_answer=candidate_answer,
-        evaluation=evaluation_text,
-        strategy=strategy_text,
-        question_count=question_count
-    )
+    retrieved_context=retrieved_context,
+    previous_question=previous_question,
+    candidate_answer=candidate_answer,
+    evaluation=evaluation_text,
+    strategy=strategy_text,
+    difficulty=state.get(
+        "difficulty",
+        "MEDIUM"
+    ),
+    question_count=question_count
+)
 
     try:
 
@@ -480,7 +455,7 @@ def generate_interview_question_node(
 
     strategy_reason = (
         question_strategy.get(
-            "reason",
+            "reasoning",
             ""
         )
     )
@@ -613,18 +588,11 @@ def question_strategy_node(
         )
     )
 
-    prompt = f"""
-    {QUESTION_STRATEGY_PROMPT}
-
-    Previous Question:
-    {previous_question}
-
-    Candidate Answer:
-    {candidate_answer}
-
-    Evaluation:
-    {evaluation_text}
-    """
+    prompt = QUESTION_STRATEGY_PROMPT.format(
+    previous_question=previous_question,
+    candidate_answer=candidate_answer,
+    evaluation=evaluation_text
+)
 
     try:
 
@@ -657,38 +625,49 @@ def question_strategy_node(
 
         raise
 
-    strategy_response = response.content
-    strategy, reason = _parse_strategy_response(
-        strategy_response
+    strategy_response = json.loads(
+        response.content
     )
 
-    state["question_strategy"] = {
-        "strategy": strategy,
-        "reason": reason,
-        "raw_response": strategy_response
-    }
+    state["question_strategy"] = strategy_response
 
     logger.info(
-        (
-            "question_strategy_generated "
-            "question_count=%s "
-            "strategy=%s "
-            "reason=%s "
-            "response_chars=%s "
-            "duration_ms=%s "
-            "usage=%s "
-            "output_preview=%s"
-        ),
-        state.get(
-            "question_count",
-            0
-        ),
-        strategy,
-        _compact_for_log(reason, max_chars=300),
-        len(strategy_response or ""),
-        int((perf_counter() - started_at) * 1000),
-        _usage_metadata(response),
-        _compact_for_log(strategy_response)
+    (
+        "question_strategy_generated "
+        "question_count=%s "
+        "strategy_type=%s "
+        "user_intent=%s "
+        "difficulty_level=%s "
+        "should_explain=%s "
+        "should_end_interview=%s "
+        "duration_ms=%s "
+        "usage=%s "
+        "output_preview=%s"
+    ),
+    state.get(
+        "question_count",
+        0
+    ),
+    strategy_response.get(
+        "strategy_type"
+    ),
+    strategy_response.get(
+        "user_intent"
+    ),
+    strategy_response.get(
+        "difficulty_level"
+    ),
+    strategy_response.get(
+        "should_explain"
+    ),
+    strategy_response.get(
+        "should_end_interview"
+    ),
+    int((perf_counter() - started_at) * 1000),
+    _usage_metadata(response),
+    _compact_for_log(
+        response.content
     )
+)
 
     return state

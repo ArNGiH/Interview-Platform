@@ -52,6 +52,9 @@ def start_interview(
         "interview_role": (
         interview_session.role
     ),
+         "difficulty": (
+            interview_session.difficulty
+        ),
 
         "experience_level": (
             interview_session.experience_level
