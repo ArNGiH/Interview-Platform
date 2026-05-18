@@ -33,6 +33,11 @@ class StrategyOutput(TypedDict):
     should_end_interview: bool
     next_topic: Optional[str]
     reasoning: str
+    next_node: str  
+    topic: str | None
+    candidate_confidence: str | None
+    candidate_conduct: str | None
+    interview_phase: str | None
 
 class InterviewState(TypedDict):
 
@@ -40,6 +45,11 @@ class InterviewState(TypedDict):
     resume_id: str | None
     system_prompt: str
     messages: List[dict]
+    current_topic: str | None
+    topic_history: List[str]
+    candidate_confidence: str | None
+    candidate_conduct: str | None
+    interview_phase: str | None
     retrieved_chunks: List[str]
     latest_user_message: Optional[str]
     current_question: Optional[str]

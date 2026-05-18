@@ -17,13 +17,29 @@ from app.agents.interview.nodes import (
     retrieve_resume_context_node,
     evaluate_candidate_answer_node,
     question_strategy_node,
-    generate_interview_question_node,
-    persist_interview_state_node
+    persist_interview_state_node,
+    clarification_node,
+    easier_question_node,
+    deep_technical_node,
+    topic_transition_node,
+    system_design_node,
+    conduct_warning_node,
+    end_interview_node,
+    default_question_node
 )
 
 
 memory = MemorySaver()
 
+def strategy_router(state):
+
+    question_strategy = (
+        state.get("question_strategy") or {}
+    )
+    return question_strategy.get(
+        "next_node",
+        "default_question_node"
+    )
 
 def build_interview_graph(db):
 
@@ -50,16 +66,50 @@ def build_interview_graph(db):
     )
 
     graph_builder.add_node(
-        "generate_interview_question",
-        generate_interview_question_node
-    )
-
-    graph_builder.add_node(
         "persist_interview_state",
         partial(
             persist_interview_state_node,
             db=db
         )
+    )
+    graph_builder.add_node(
+    "clarification_node",
+    clarification_node
+)
+
+    graph_builder.add_node(
+        "easier_question_node",
+        easier_question_node
+    )
+
+    graph_builder.add_node(
+        "deep_technical_node",
+        deep_technical_node
+    )
+
+    graph_builder.add_node(
+        "topic_transition_node",
+        topic_transition_node
+    )
+
+    graph_builder.add_node(
+        "system_design_node",
+        system_design_node
+    )
+
+    graph_builder.add_node(
+        "conduct_warning_node",
+        conduct_warning_node
+    )
+
+    graph_builder.add_node(
+        "end_interview_node",
+        end_interview_node
+    )
+
+    graph_builder.add_node(
+        "default_question_node",
+        default_question_node
     )
 
     graph_builder.set_entry_point(
@@ -76,13 +126,73 @@ def build_interview_graph(db):
         "question_strategy"
     )
 
+    graph_builder.add_conditional_edges(
+    "question_strategy",
+    strategy_router,
+    {
+        "clarification_node":
+            "clarification_node",
+
+        "easier_question_node":
+            "easier_question_node",
+
+        "deep_technical_node":
+            "deep_technical_node",
+
+        "topic_transition_node":
+            "topic_transition_node",
+
+        "system_design_node":
+            "system_design_node",
+
+        "conduct_warning_node":
+            "conduct_warning_node",
+
+        "end_interview_node":
+            "end_interview_node",
+
+        "default_question_node":
+            "default_question_node"
+    }
+)
+
     graph_builder.add_edge(
-        "question_strategy",
-        "generate_interview_question"
+    "clarification_node",
+    "persist_interview_state"
+)
+
+    graph_builder.add_edge(
+        "easier_question_node",
+        "persist_interview_state"
     )
 
     graph_builder.add_edge(
-        "generate_interview_question",
+        "deep_technical_node",
+        "persist_interview_state"
+    )
+
+    graph_builder.add_edge(
+    "topic_transition_node",
+    "default_question_node"
+)
+
+    graph_builder.add_edge(
+        "system_design_node",
+        "persist_interview_state"
+    )
+
+    graph_builder.add_edge(
+        "conduct_warning_node",
+        "persist_interview_state"
+    )
+
+    graph_builder.add_edge(
+        "end_interview_node",
+        "persist_interview_state"
+    )
+
+    graph_builder.add_edge(
+        "default_question_node",
         "persist_interview_state"
     )
 

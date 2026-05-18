@@ -22,7 +22,14 @@ from app.agents.interview.prompts import (
     INTERVIEW_SYSTEM_PROMPT,
     INTERVIEW_INTRO_PROMPT,
     FOLLOWUP_EVALUATION_PROMPT,
-    QUESTION_STRATEGY_PROMPT
+    QUESTION_STRATEGY_PROMPT,
+    CLARIFICATION_PROMPT,
+    EASY_RECOVERY_PROMPT,
+    DEEP_TECHNICAL_PROMPT,
+    END_INTERVIEW_PROMPT,
+    CONDUCT_WARNING_PROMPT,
+    SYSTEM_DESIGN_PROMPT,
+    DEFAULT_QUESTION_PROMPT
 )
 
 from app.services.llm_service import (
@@ -670,4 +677,344 @@ def question_strategy_node(
     )
 )
 
+    return state
+
+def clarification_node(state):
+
+    logger.info(
+        "clarification_node_started"
+    )
+
+    llm = get_llm()
+
+    previous_question = (
+        state["messages"][-2]["content"]
+        if len(state["messages"]) >= 2
+        else ""
+    )
+
+    candidate_answer = (
+        state.get(
+            "latest_user_message",
+            ""
+        )
+    )
+
+    question_strategy = (
+        state.get(
+            "question_strategy",
+            {}
+        )
+    )
+
+    prompt = CLARIFICATION_PROMPT.format(
+        current_topic=state.get(
+            "current_topic"
+        ),
+        previous_question=previous_question,
+        candidate_answer=candidate_answer,
+        reasoning=question_strategy.get(
+            "reasoning"
+        )
+    )
+    response = llm.invoke(prompt)
+    state["current_question"] = (
+        response.content
+    )
+
+    return state
+
+def easier_question_node(state):
+
+    logger.info(
+        "easier_question_node_started"
+    )
+
+    llm = get_llm()
+
+    question_strategy = (
+        state.get(
+            "question_strategy",
+            {}
+        )
+    )
+
+    evaluation = (
+        state.get(
+            "candidate_evaluation",
+            {}
+        )
+    )
+    prompt = EASY_RECOVERY_PROMPT.format(
+        current_topic=state.get(
+            "current_topic"
+        ),
+        interview_role=state.get(
+            "interview_role"
+        ),
+        evaluation=evaluation,
+        reasoning=question_strategy.get(
+            "reasoning"
+        )
+    )
+    response = llm.invoke(prompt)
+    state["current_question"] = (
+        response.content
+    )
+    return state
+
+def deep_technical_node(state):
+
+    logger.info(
+        "deep_technical_node_started"
+    )
+    llm = get_llm()
+    previous_question = (
+        state["messages"][-2]["content"]
+        if len(state["messages"]) >= 2
+        else ""
+    )
+    candidate_answer = (
+        state.get(
+            "latest_user_message",
+            ""
+        )
+    )
+    evaluation = (
+        state.get(
+            "candidate_evaluation",
+            {}
+        )
+    )
+    question_strategy = (
+        state.get(
+            "question_strategy",
+            {}
+        )
+    )
+    prompt = DEEP_TECHNICAL_PROMPT.format(
+        current_topic=state.get(
+            "current_topic"
+        ),
+        previous_question=previous_question,
+        candidate_answer=candidate_answer,
+        evaluation=evaluation,
+        reasoning=question_strategy.get(
+            "reasoning"
+        )
+    )
+    response = llm.invoke(prompt)
+    state["current_question"] = (
+        response.content
+    )
+
+    return state
+
+def topic_transition_node(state):
+
+    logger.info(
+        "topic_transition_node_started"
+    )
+    next_topic = (
+        state.get(
+            "question_strategy",
+            {}
+        ).get(
+            "next_topic"
+        )
+    )
+    if next_topic:
+
+        state["current_topic"] = (
+            next_topic
+        )
+
+        topic_history = (
+            state.get(
+                "topic_history",
+                []
+            )
+        )
+
+        topic_history.append(
+            next_topic
+        )
+        state["topic_history"] = (
+            topic_history
+        )
+    return generate_interview_question_node(
+        state
+    )
+
+def system_design_node(state):
+
+    logger.info(
+        "system_design_node_started"
+    )
+
+    llm = get_llm()
+
+    question_strategy = (
+        state.get(
+            "question_strategy",
+            {}
+        )
+    )
+
+    evaluation = (
+        state.get(
+            "candidate_evaluation",
+            {}
+        )
+    )
+
+    prompt = SYSTEM_DESIGN_PROMPT.format(
+        interview_role=state.get(
+            "interview_role"
+        ),
+        experience_level=state.get(
+            "experience_level"
+        ),
+        current_topic=state.get(
+            "current_topic"
+        ),
+        evaluation=evaluation,
+        reasoning=question_strategy.get(
+            "reasoning"
+        )
+    )
+    response = llm.invoke(prompt)
+    state["current_question"] = (
+        response.content
+    )
+    return state
+def conduct_warning_node(state):
+
+    logger.info(
+        "conduct_warning_node_started"
+    )
+
+    llm = get_llm()
+
+    previous_question = (
+        state["messages"][-2]["content"]
+        if len(state["messages"]) >= 2
+        else ""
+    )
+    candidate_answer = (
+        state.get(
+            "latest_user_message",
+            ""
+        )
+    )
+    question_strategy = (
+        state.get(
+            "question_strategy",
+            {}
+        )
+    )
+    prompt = CONDUCT_WARNING_PROMPT.format(
+        previous_question=previous_question,
+        candidate_answer=candidate_answer,
+        reasoning=question_strategy.get(
+            "reasoning"
+        )
+    )
+    response = llm.invoke(prompt)
+    state["current_question"] = (
+        response.content
+    )
+
+    return state
+
+def end_interview_node(state):
+
+    logger.info(
+        "end_interview_node_started"
+    )
+    llm = get_llm()
+    candidate_answer = (
+        state.get(
+            "latest_user_message",
+            ""
+        )
+    )
+    question_strategy = (
+        state.get(
+            "question_strategy",
+            {}
+        )
+    )
+    prompt = END_INTERVIEW_PROMPT.format(
+        candidate_answer=candidate_answer,
+        reasoning=question_strategy.get(
+            "reasoning"
+        )
+    )
+    response = llm.invoke(prompt)
+    state["current_question"] = (
+        response.content
+    )
+
+    return state
+
+def default_question_node(state):
+
+    logger.info(
+        "default_question_node_started"
+    )
+
+    llm = get_llm()
+
+    previous_question = (
+        state["messages"][-2]["content"]
+        if len(state["messages"]) >= 2
+        else ""
+    )
+
+    candidate_answer = (
+        state.get(
+            "latest_user_message",
+            ""
+        )
+    )
+
+    evaluation = (
+        state.get(
+            "candidate_evaluation",
+            {}
+        )
+    )
+
+    question_strategy = (
+        state.get(
+            "question_strategy",
+            {}
+        )
+    )
+
+    prompt = DEFAULT_QUESTION_PROMPT.format(
+        interview_role=state.get(
+            "interview_role"
+        ),
+        experience_level=state.get(
+            "experience_level"
+        ),
+        interview_type=state.get(
+            "interview_type"
+        ),
+        current_topic=state.get(
+            "current_topic"
+        ),
+        previous_question=previous_question,
+        candidate_answer=candidate_answer,
+        evaluation=evaluation,
+        reasoning=question_strategy.get(
+            "reasoning"
+        )
+    )
+    response = llm.invoke(prompt)
+    state["current_question"] = (
+        response.content
+    )
     return state
