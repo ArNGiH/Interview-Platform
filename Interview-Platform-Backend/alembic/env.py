@@ -8,6 +8,7 @@ from app.models.interview_session import InterviewSession
 from app.models.resume import Resume
 from app.models.resume_chunk import ResumeChunk
 from app.models.interview_message import InterviewMessage
+from app.models.interview_feedback import InterviewFeedback
 
 from alembic import context
 

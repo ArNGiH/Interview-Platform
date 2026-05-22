@@ -1,8 +1,6 @@
-from pydantic import BaseModel
 from uuid import UUID
 
-class ChatRequest(BaseModel):
-    message: str
+from pydantic import BaseModel
 
 class InterviewSetupRequest(BaseModel):
     role: str
@@ -16,13 +14,9 @@ class InterviewSetupRequest(BaseModel):
 
 
 class InterviewChatRequest(BaseModel):
-    interview_id: UUID
-    user_message: str
+    interview_id: str
+    message: str
 
 
 class StartInterviewRequest(BaseModel):
     interview_id: UUID
-
-class InterviewChatRequest(BaseModel):
-    interview_id: str
-    message: str

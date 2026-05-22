@@ -2,8 +2,13 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
-import { sendInterviewMessage } from "@/lib/api";
+import { useParams, useRouter } from "next/navigation";
+import {
+  getInterviewHistory,
+  sendInterviewMessage,
+  submitInterview
+} from "@/utils/api/chat";
+import { getApiErrorMessage } from "@/utils/api/client";
 import type { InterviewMessage } from "@/types/api";
 import type { StoredInterviewSession } from "@/types/session";
 
@@ -17,38 +22,101 @@ function fallbackSession(interviewId: string): StoredInterviewSession {
     interviewMode: "Live chat",
     resumeName: "",
     firstQuestion: "This interview is ready. Send your response to continue.",
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    status: "active"
   };
+}
+
+function formatStatus(value: StoredInterviewSession["status"]) {
+  if (!value) {
+    return "Active";
+  }
+
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 export default function InterviewChatPage() {
   const params = useParams<{ interviewId: string }>();
+  const router = useRouter();
   const interviewId = params.interviewId;
   const [session, setSession] = useState<StoredInterviewSession>(() =>
     fallbackSession(interviewId)
   );
   const [messages, setMessages] = useState<InterviewMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem(`interview:${interviewId}`);
-    const parsedSession = stored
-      ? (JSON.parse(stored) as StoredInterviewSession)
-      : fallbackSession(interviewId);
+    let isMounted = true;
 
-    setSession(parsedSession);
-    setMessages([
-      {
-        id: `${interviewId}:assistant:initial`,
-        role: "assistant",
-        content: parsedSession.firstQuestion,
-        createdAt: parsedSession.startedAt
+    async function loadHistory() {
+      setIsLoadingHistory(true);
+      setError("");
+
+      try {
+        const response = await getInterviewHistory(interviewId);
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (response.session.status === "submitted") {
+          router.replace(`/interview/${interviewId}/submitted`);
+          return;
+        }
+
+        const firstAssistantMessage = response.messages.find(
+          (message) => message.role === "assistant"
+        );
+
+        setSession({
+          interviewId: response.session.interview_id,
+          role: response.session.role,
+          experienceLevel: response.session.experience_level,
+          difficulty: response.session.difficulty,
+          interviewType: response.session.interview_type,
+          interviewMode: response.session.interview_mode,
+          resumeName: response.session.resume_uploaded ? "Resume attached" : "",
+          firstQuestion:
+            firstAssistantMessage?.content ||
+            "This interview is ready. Send your response to continue.",
+          startedAt: response.session.created_at || new Date().toISOString(),
+          status: response.session.status
+        });
+
+        setMessages(
+          response.messages.map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            createdAt: message.created_at || new Date().toISOString()
+          }))
+        );
+      } catch (historyError) {
+        if (!isMounted) {
+          return;
+        }
+
+        setSession(fallbackSession(interviewId));
+        setMessages([]);
+        setError(getApiErrorMessage(historyError, "Could not load interview history"));
+      } finally {
+        if (isMounted) {
+          setIsLoadingHistory(false);
+        }
       }
-    ]);
-  }, [interviewId]);
+    }
+
+    loadHistory();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [interviewId, router]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
@@ -65,7 +133,7 @@ export default function InterviewChatPage() {
 
     const trimmedDraft = draft.trim();
 
-    if (!trimmedDraft || isSending) {
+    if (!trimmedDraft || isSending || isLoadingHistory) {
       return;
     }
 
@@ -97,10 +165,28 @@ export default function InterviewChatPage() {
 
       setMessages((currentMessages) => [...currentMessages, assistantMessage]);
     } catch (chatError) {
-      setError(chatError instanceof Error ? chatError.message : "Message failed");
+      setError(getApiErrorMessage(chatError, "Message failed"));
       setDraft(trimmedDraft);
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function handleEndInterview() {
+    if (isEnding || isSending || isLoadingHistory) {
+      return;
+    }
+
+    setError("");
+    setIsEnding(true);
+
+    try {
+      await submitInterview(interviewId);
+      router.push(`/interview/${interviewId}/submitted`);
+    } catch (submitError) {
+      setError(getApiErrorMessage(submitError, "Could not end interview"));
+    } finally {
+      setIsEnding(false);
     }
   }
 
@@ -137,9 +223,14 @@ export default function InterviewChatPage() {
           </div>
 
           <div className="sidebar-block">
-            <Link className="button button-secondary" href="/setup">
-              New interview
-            </Link>
+            <div className="sidebar-actions">
+              <Link className="button button-secondary" href="/setup">
+                New interview
+              </Link>
+              <Link className="button button-ghost" href="/interviews">
+                Previous interviews
+              </Link>
+            </div>
           </div>
         </aside>
 
@@ -152,11 +243,33 @@ export default function InterviewChatPage() {
 
             <span className="status-pill">
               <span className="status-dot status-dot-online" />
-              Session active
+              {formatStatus(session.status)}
             </span>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={handleEndInterview}
+              disabled={isLoadingHistory || isSending || isEnding}
+            >
+              {isEnding ? "Ending..." : "End interview"}
+            </button>
           </header>
 
           <div className="messages" aria-live="polite">
+            {isLoadingHistory ? (
+              <article className="message assistant">
+                <div className="message-meta">Interviewer</div>
+                <div className="bubble">Loading interview history...</div>
+              </article>
+            ) : null}
+
+            {!isLoadingHistory && messages.length === 0 ? (
+              <article className="message assistant">
+                <div className="message-meta">Interviewer</div>
+                <div className="bubble">{session.firstQuestion}</div>
+              </article>
+            ) : null}
+
             {messages.map((message) => (
               <article className={`message ${message.role}`} key={message.id}>
                 <div className="message-meta">
@@ -185,9 +298,14 @@ export default function InterviewChatPage() {
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 placeholder="Type your answer as the candidate..."
+                disabled={isLoadingHistory}
               />
 
-              <button className="button button-primary" type="submit" disabled={isSending || !draft.trim()}>
+              <button
+                className="button button-primary"
+                type="submit"
+                disabled={isLoadingHistory || isSending || !draft.trim()}
+              >
                 {isSending ? "Sending..." : "Send answer"}
               </button>
             </form>

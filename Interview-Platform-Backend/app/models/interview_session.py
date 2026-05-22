@@ -45,6 +45,12 @@ class InterviewSession(Base):
 
     interview_mode = Column(String, nullable=False)
 
+    status = Column(
+        String,
+        nullable=False,
+        default="active"
+    )
+
     resume_uploaded = Column(Boolean, default=False)
 
     job_description_provided = Column(Boolean, default=False)

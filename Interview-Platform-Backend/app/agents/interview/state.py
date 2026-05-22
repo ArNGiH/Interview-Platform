@@ -59,3 +59,5 @@ class InterviewState(TypedDict):
     interview_role: str
     experience_level: str
     interview_type: str
+    interview_mode: str | None
+    difficulty: str

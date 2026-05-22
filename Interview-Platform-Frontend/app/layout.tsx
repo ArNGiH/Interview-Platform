@@ -30,6 +30,9 @@ export default function RootLayout({
                 <Link className="button button-ghost" href="/">
                   Home
                 </Link>
+                <Link className="button button-ghost" href="/interviews">
+                  Interviews
+                </Link>
                 <Link className="button button-secondary" href="/setup">
                   New interview
                 </Link>

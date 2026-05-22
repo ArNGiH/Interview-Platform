@@ -43,6 +43,18 @@ def start_interview(
             "Interview session not found"
         )
 
+    if interview_session.status == "submitted":
+        logger.warning(
+            (
+                "submitted_interview_start_rejected "
+                "interview_id=%s"
+            ),
+            interview_id
+        )
+        raise Exception(
+            "Interview has already been submitted"
+        )
+
     initial_state = {
 
         "interview_id": str(
@@ -62,6 +74,10 @@ def start_interview(
 
         "interview_type": (
             interview_session.interview_type
+        ),
+
+        "interview_mode": (
+            interview_session.interview_mode
         ),
 
         "system_prompt": (

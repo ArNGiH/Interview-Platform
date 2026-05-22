@@ -70,30 +70,36 @@ def setup_logger():
         )
         return logger
 
-    # AWS client
-    boto3_client = boto3.client(
-        "logs",
-        region_name=AWS_REGION,
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY
-    )
-
-    # CloudWatch logging
-    cloudwatch_handler = (
-        watchtower.CloudWatchLogHandler(
-            boto3_client=boto3_client,
-            log_group_name=CLOUDWATCH_LOG_GROUP,
-            log_stream_name=CLOUDWATCH_LOG_STREAM
+    try:
+        # AWS client
+        boto3_client = boto3.client(
+            "logs",
+            region_name=AWS_REGION,
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY
         )
-    )
 
-    cloudwatch_handler.setFormatter(
-        formatter
-    )
+        # CloudWatch logging
+        cloudwatch_handler = (
+            watchtower.CloudWatchLogHandler(
+                boto3_client=boto3_client,
+                log_group_name=CLOUDWATCH_LOG_GROUP,
+                log_stream_name=CLOUDWATCH_LOG_STREAM
+            )
+        )
 
-    logger.addHandler(
-        cloudwatch_handler
-    )
+        cloudwatch_handler.setFormatter(
+            formatter
+        )
+
+        logger.addHandler(
+            cloudwatch_handler
+        )
+
+    except Exception:
+        logger.warning(
+            "cloudwatch_logging_disabled reason=handler_initialization_failed"
+        )
 
     return logger
 

@@ -1,6 +1,3 @@
-import json
-import os
-import re
 from time import perf_counter
 
 from langchain_core.messages import (
@@ -10,78 +7,42 @@ from langchain_core.messages import (
 
 from app.core.logger import logger
 
-from app.agents.interview.state import (
-    InterviewState
-)
-
-from app.models.interview_message import (
-    InterviewMessage
-)
-
 from app.agents.interview.prompts import (
     INTERVIEW_SYSTEM_PROMPT,
     INTERVIEW_INTRO_PROMPT,
-    FOLLOWUP_EVALUATION_PROMPT,
-    QUESTION_STRATEGY_PROMPT,
     CLARIFICATION_PROMPT,
     EASY_RECOVERY_PROMPT,
     DEEP_TECHNICAL_PROMPT,
     END_INTERVIEW_PROMPT,
     CONDUCT_WARNING_PROMPT,
     SYSTEM_DESIGN_PROMPT,
-    DEFAULT_QUESTION_PROMPT
+    DEFAULT_QUESTION_PROMPT,
+    BEHAVIORAL_QUESTION_PROMPT
+)
+
+from app.agents.interview.state import (
+    InterviewState
 )
 
 from app.services.llm_service import (
     get_llm
 )
 
-from app.services.retrieval_service import (
-    retrieve_relevant_resume_chunks
+from app.agents.interview.agents.common import (
+    append_assistant_response,
+    compact_for_log,
+    fallback_behavioral_question,
+    has_behavioral_technical_leak,
+    is_behavioral_interview,
+    log_agent_output,
+    state_upper,
+    usage_metadata
 )
 
+
+INTERVIEWER_AGENT_NAME = "Interviewer Agent"
 
 llm = get_llm()
-
-
-LLM_LOG_OUTPUT_CHARS = int(
-    os.getenv(
-        "LLM_LOG_OUTPUT_CHARS",
-        "700"
-    )
-)
-
-
-def _compact_for_log(
-    text: str | None,
-    max_chars: int = LLM_LOG_OUTPUT_CHARS
-):
-
-    compact_text = re.sub(
-        r"\s+",
-        " ",
-        text or ""
-    ).strip()
-
-    if len(compact_text) > max_chars:
-        compact_text = (
-            compact_text[:max_chars] + "...[truncated]"
-        )
-
-    return json.dumps(
-        compact_text
-    )
-
-
-def _usage_metadata(response):
-
-    return getattr(
-        response,
-        "usage_metadata",
-        None
-    )
-
-
 
 
 def generate_interview_intro_node(
@@ -145,196 +106,28 @@ def generate_interview_intro_node(
 
     generated_intro = response.content
 
-    state["current_question"] = (
+    append_assistant_response(
+        state,
         generated_intro
     )
 
-    state["messages"].append(
-        {
-            "role": "assistant",
-            "content": generated_intro
-        }
-    )
-
-    state["question_count"] = 1
-
     logger.info(
         (
-            "interview_intro_generated "
+            "interview_node_output "
+            "node=generate_interview_intro "
+            "interview_id=%s "
             "response_chars=%s "
             "duration_ms=%s "
             "usage=%s "
-            "output_preview=%s"
+            "output=%s"
+        ),
+        state.get(
+            "interview_id"
         ),
         len(generated_intro or ""),
         int((perf_counter() - started_at) * 1000),
-        _usage_metadata(response),
-        _compact_for_log(generated_intro)
-    )
-
-    return state
-
-
-
-def retrieve_resume_context_node(
-    state: InterviewState,
-    db
-):
-
-    started_at = perf_counter()
-
-
-    resume_id = state.get(
-        "resume_id"
-    )
-
-    question_count = state.get(
-        "question_count",
-        0
-    )
-
-    retrieval_query = f"""
-    Interview questions for:
-    {state.get("latest_user_message", "")}
-    """
-
-    try:
-
-        retrieved_chunks = (
-            retrieve_relevant_resume_chunks(
-                db=db,
-                resume_id=resume_id,
-                query=retrieval_query,
-                top_k=5
-            )
-        )
-
-    except Exception:
-
-        logger.exception(
-            (
-                "resume_context_retrieval_failed "
-                "resume_id=%s question_count=%s"
-            ),
-            resume_id,
-            question_count
-        )
-
-        raise
-
-    state["retrieved_chunks"] = (
-        retrieved_chunks
-    )
-
-    logger.info(
-        (
-            "resume_context_retrieved "
-            "resume_id=%s question_count=%s "
-            "chunks=%s duration_ms=%s"
-        ),
-        resume_id,
-        question_count,
-        len(retrieved_chunks),
-        int((perf_counter() - started_at) * 1000)
-    )
-
-    return state
-
-def evaluate_candidate_answer_node(
-    state: InterviewState
-):
-
-    started_at = perf_counter()
-
-    latest_user_message = state.get(
-        "latest_user_message",
-        ""
-    )
-
-    messages = state.get(
-        "messages",
-        []
-    )
-
-    previous_question = ""
-
-    for message in reversed(messages):
-
-        if message["role"] == "assistant":
-
-            previous_question = (
-                message["content"]
-            )
-
-            break
-
-    prompt = f"""
-    {FOLLOWUP_EVALUATION_PROMPT}
-
-    Interviewer Question:
-    {previous_question}
-
-    Candidate Answer:
-    {latest_user_message}
-
-    Analyze the candidate response.
-    """
-
-    try:
-
-        response = llm.invoke(
-            [
-                SystemMessage(
-                    content=prompt
-                ),
-                HumanMessage(
-                    content=(
-                        "Evaluate the candidate response."
-                    )
-                )
-            ]
-        )
-
-    except Exception:
-
-        logger.exception(
-            (
-                "candidate_answer_evaluation_failed "
-                "question_count=%s"
-            ),
-            state.get(
-                "question_count",
-                0
-            )
-        )
-
-        raise
-
-    evaluation = response.content
-
-    state["candidate_evaluation"] = {
-        "question": previous_question,
-        "answer": latest_user_message,
-        "evaluation": evaluation
-    }
-
-    logger.info(
-        (
-            "candidate_answer_evaluated "
-            "question_count=%s "
-            "response_chars=%s "
-            "duration_ms=%s "
-            "usage=%s "
-            "evaluation_preview=%s"
-        ),
-        state.get(
-            "question_count",
-            0
-        ),
-        len(evaluation or ""),
-        int((perf_counter() - started_at) * 1000),
-        _usage_metadata(response),
-        _compact_for_log(evaluation)
+        usage_metadata(response),
+        compact_for_log(generated_intro)
     )
 
     return state
@@ -389,24 +182,36 @@ def generate_interview_question_node(
     )
 
     strategy_text = (
-    question_strategy.get(
+        question_strategy.get(
             "strategy_type",
             ""
         )
     )
 
     prompt = INTERVIEW_SYSTEM_PROMPT.format(
-    retrieved_context=retrieved_context,
-    previous_question=previous_question,
-    candidate_answer=candidate_answer,
-    evaluation=evaluation_text,
-    strategy=strategy_text,
-    difficulty=state.get(
-        "difficulty",
-        "MEDIUM"
-    ),
-    question_count=question_count
-)
+        retrieved_context=retrieved_context,
+        previous_question=previous_question,
+        candidate_answer=candidate_answer,
+        evaluation=evaluation_text,
+        strategy=strategy_text,
+        difficulty=state.get(
+            "difficulty",
+            "MEDIUM"
+        ),
+        interview_role=state.get(
+            "interview_role",
+            "Software Engineer"
+        ),
+        experience_level=state.get(
+            "experience_level",
+            "mid-level"
+        ),
+        interview_type=state.get(
+            "interview_type",
+            "technical"
+        ),
+        question_count=question_count
+    )
 
     try:
 
@@ -447,18 +252,10 @@ def generate_interview_question_node(
         response.content
     )
 
-    state["current_question"] = (
+    append_assistant_response(
+        state,
         generated_question
     )
-
-    state["messages"].append(
-        {
-            "role": "assistant",
-            "content": generated_question
-        }
-    )
-
-    state["question_count"] += 1
 
     strategy_reason = (
         question_strategy.get(
@@ -469,217 +266,30 @@ def generate_interview_question_node(
 
     logger.info(
         (
-            "interview_question_generated "
+            "interview_node_output "
+            "node=generate_interview_question "
             "question_count=%s "
             "strategy=%s "
             "strategy_reason=%s "
             "response_chars=%s "
             "duration_ms=%s "
             "usage=%s "
-            "question_preview=%s"
+            "output=%s"
         ),
         state["question_count"],
         strategy_text,
-        _compact_for_log(strategy_reason, max_chars=300),
+        compact_for_log(strategy_reason, max_chars=300),
         len(generated_question or ""),
         int((perf_counter() - started_at) * 1000),
-        _usage_metadata(response),
-        _compact_for_log(generated_question)
+        usage_metadata(response),
+        compact_for_log(generated_question)
     )
-
-    return state
-
-
-def persist_interview_state_node(
-    state: InterviewState,
-    db
-):
-
-    started_at = perf_counter()
-
-
-    interview_id = state.get(
-        "interview_id"
-    )
-
-    messages = state.get(
-        "messages",
-        []
-    )
-
-    if not messages:
-
-        logger.warning(
-            (
-                "persist_interview_state_skipped "
-                "reason=no_messages "
-                "interview_id=%s"
-            ),
-            interview_id
-        )
-
-        return state
-
-    latest_message = messages[-1]
-
-    try:
-
-        interview_message = (
-            InterviewMessage(
-                interview_id=interview_id,
-                role=latest_message["role"],
-                message=latest_message["content"]
-            )
-        )
-
-        db.add(interview_message)
-
-        db.commit()
-
-    except Exception:
-
-        db.rollback()
-
-        logger.exception(
-            (
-                "persist_interview_state_failed "
-                "interview_id=%s"
-            ),
-            interview_id
-        )
-
-        raise
-
-    logger.info(
-        (
-            "interview_message_persisted "
-            "interview_id=%s role=%s "
-            "duration_ms=%s"
-        ),
-        interview_id,
-        latest_message["role"],
-        int((perf_counter() - started_at) * 1000)
-    )
-
-    return state
-
-def question_strategy_node(
-    state: InterviewState
-):
-
-    started_at = perf_counter()
-
-    candidate_evaluation = state.get(
-        "candidate_evaluation",
-        {}
-    )
-
-    evaluation_text = (
-        candidate_evaluation.get(
-            "evaluation",
-            ""
-        )
-    )
-
-    previous_question = (
-        candidate_evaluation.get(
-            "question",
-            ""
-        )
-    )
-
-    candidate_answer = (
-        candidate_evaluation.get(
-            "answer",
-            ""
-        )
-    )
-
-    prompt = QUESTION_STRATEGY_PROMPT.format(
-    previous_question=previous_question,
-    candidate_answer=candidate_answer,
-    evaluation=evaluation_text
-)
-
-    try:
-
-        response = llm.invoke(
-            [
-                SystemMessage(
-                    content=prompt
-                ),
-                HumanMessage(
-                    content=(
-                        "Determine the next "
-                        "interview strategy."
-                    )
-                )
-            ]
-        )
-
-    except Exception:
-
-        logger.exception(
-            (
-                "question_strategy_generation_failed "
-                "question_count=%s"
-            ),
-            state.get(
-                "question_count",
-                0
-            )
-        )
-
-        raise
-
-    strategy_response = json.loads(
-        response.content
-    )
-
-    state["question_strategy"] = strategy_response
-
-    logger.info(
-    (
-        "question_strategy_generated "
-        "question_count=%s "
-        "strategy_type=%s "
-        "user_intent=%s "
-        "difficulty_level=%s "
-        "should_explain=%s "
-        "should_end_interview=%s "
-        "duration_ms=%s "
-        "usage=%s "
-        "output_preview=%s"
-    ),
-    state.get(
-        "question_count",
-        0
-    ),
-    strategy_response.get(
-        "strategy_type"
-    ),
-    strategy_response.get(
-        "user_intent"
-    ),
-    strategy_response.get(
-        "difficulty_level"
-    ),
-    strategy_response.get(
-        "should_explain"
-    ),
-    strategy_response.get(
-        "should_end_interview"
-    ),
-    int((perf_counter() - started_at) * 1000),
-    _usage_metadata(response),
-    _compact_for_log(
-        response.content
-    )
-)
 
     return state
 
 def clarification_node(state):
+
+    started_at = perf_counter()
 
     logger.info(
         "clarification_node_started"
@@ -718,17 +328,39 @@ def clarification_node(state):
         )
     )
     response = llm.invoke(prompt)
-    state["current_question"] = (
+    append_assistant_response(
+        state,
         response.content
+    )
+    log_agent_output(
+        INTERVIEWER_AGENT_NAME,
+        "clarification_node",
+        state,
+        response,
+        started_at
     )
 
     return state
 
 def easier_question_node(state):
 
+    started_at = perf_counter()
+
     logger.info(
         "easier_question_node_started"
     )
+
+    if is_behavioral_interview(state):
+        logger.info(
+            (
+                "easier_question_redirected "
+                "reason=behavioral_interview "
+                "target_node=default_question_node"
+            )
+        )
+        return default_question_node(
+            state
+        )
 
     llm = get_llm()
 
@@ -752,18 +384,38 @@ def easier_question_node(state):
         interview_role=state.get(
             "interview_role"
         ),
+        interview_type=state_upper(
+            state,
+            "interview_type",
+            "technical"
+        ),
+        requested_difficulty=state_upper(
+            state,
+            "difficulty",
+            "medium"
+        ),
         evaluation=evaluation,
         reasoning=question_strategy.get(
             "reasoning"
         )
     )
     response = llm.invoke(prompt)
-    state["current_question"] = (
+    append_assistant_response(
+        state,
         response.content
+    )
+    log_agent_output(
+        INTERVIEWER_AGENT_NAME,
+        "easier_question_node",
+        state,
+        response,
+        started_at
     )
     return state
 
 def deep_technical_node(state):
+
+    started_at = perf_counter()
 
     logger.info(
         "deep_technical_node_started"
@@ -793,6 +445,21 @@ def deep_technical_node(state):
         )
     )
     prompt = DEEP_TECHNICAL_PROMPT.format(
+        interview_role=state.get(
+            "interview_role"
+        ),
+        experience_level=state.get(
+            "experience_level"
+        ),
+        requested_difficulty=state_upper(
+            state,
+            "difficulty",
+            "medium"
+        ),
+        question_count=state.get(
+            "question_count",
+            0
+        ),
         current_topic=state.get(
             "current_topic"
         ),
@@ -804,13 +471,23 @@ def deep_technical_node(state):
         )
     )
     response = llm.invoke(prompt)
-    state["current_question"] = (
+    append_assistant_response(
+        state,
         response.content
+    )
+    log_agent_output(
+        INTERVIEWER_AGENT_NAME,
+        "deep_technical_node",
+        state,
+        response,
+        started_at
     )
 
     return state
 
 def topic_transition_node(state):
+
+    started_at = perf_counter()
 
     logger.info(
         "topic_transition_node_started"
@@ -842,11 +519,37 @@ def topic_transition_node(state):
         state["topic_history"] = (
             topic_history
         )
+    logger.info(
+        (
+            "interview_node_output "
+            "node=topic_transition_node "
+            "interview_id=%s "
+            "next_topic=%s "
+            "topic_history=%s "
+            "duration_ms=%s"
+        ),
+        state.get(
+            "interview_id"
+        ),
+        next_topic,
+        state.get(
+            "topic_history",
+            []
+        ),
+        int((perf_counter() - started_at) * 1000)
+    )
+    if is_behavioral_interview(state):
+        return default_question_node(
+            state
+        )
+
     return generate_interview_question_node(
         state
     )
 
 def system_design_node(state):
+
+    started_at = perf_counter()
 
     logger.info(
         "system_design_node_started"
@@ -875,6 +578,16 @@ def system_design_node(state):
         experience_level=state.get(
             "experience_level"
         ),
+        requested_difficulty=state_upper(
+            state,
+            "difficulty",
+            "medium"
+        ),
+        interview_type=state_upper(
+            state,
+            "interview_type",
+            "technical"
+        ),
         current_topic=state.get(
             "current_topic"
         ),
@@ -884,11 +597,22 @@ def system_design_node(state):
         )
     )
     response = llm.invoke(prompt)
-    state["current_question"] = (
+    append_assistant_response(
+        state,
         response.content
     )
+    log_agent_output(
+        INTERVIEWER_AGENT_NAME,
+        "system_design_node",
+        state,
+        response,
+        started_at
+    )
     return state
+
 def conduct_warning_node(state):
+
+    started_at = perf_counter()
 
     logger.info(
         "conduct_warning_node_started"
@@ -921,13 +645,23 @@ def conduct_warning_node(state):
         )
     )
     response = llm.invoke(prompt)
-    state["current_question"] = (
+    append_assistant_response(
+        state,
         response.content
+    )
+    log_agent_output(
+        INTERVIEWER_AGENT_NAME,
+        "conduct_warning_node",
+        state,
+        response,
+        started_at
     )
 
     return state
 
 def end_interview_node(state):
+
+    started_at = perf_counter()
 
     logger.info(
         "end_interview_node_started"
@@ -952,13 +686,23 @@ def end_interview_node(state):
         )
     )
     response = llm.invoke(prompt)
-    state["current_question"] = (
+    append_assistant_response(
+        state,
         response.content
+    )
+    log_agent_output(
+        INTERVIEWER_AGENT_NAME,
+        "end_interview_node",
+        state,
+        response,
+        started_at
     )
 
     return state
 
 def default_question_node(state):
+
+    started_at = perf_counter()
 
     logger.info(
         "default_question_node_started"
@@ -993,15 +737,32 @@ def default_question_node(state):
         )
     )
 
-    prompt = DEFAULT_QUESTION_PROMPT.format(
+    prompt_template = (
+        BEHAVIORAL_QUESTION_PROMPT
+        if is_behavioral_interview(state)
+        else DEFAULT_QUESTION_PROMPT
+    )
+
+    prompt = prompt_template.format(
         interview_role=state.get(
             "interview_role"
         ),
         experience_level=state.get(
             "experience_level"
         ),
-        interview_type=state.get(
-            "interview_type"
+        interview_type=state_upper(
+            state,
+            "interview_type",
+            "technical"
+        ),
+        requested_difficulty=state_upper(
+            state,
+            "difficulty",
+            "medium"
+        ),
+        question_count=state.get(
+            "question_count",
+            0
         ),
         current_topic=state.get(
             "current_topic"
@@ -1014,7 +775,50 @@ def default_question_node(state):
         )
     )
     response = llm.invoke(prompt)
-    state["current_question"] = (
-        response.content
+
+    response_content = response.content
+
+    if (
+        is_behavioral_interview(state)
+        and has_behavioral_technical_leak(response_content)
+    ):
+        logger.warning(
+            (
+                "behavioral_question_rewritten "
+                "reason=technical_language_detected "
+                "interview_id=%s original_output=%s"
+            ),
+            state.get(
+                "interview_id"
+            ),
+            compact_for_log(response_content)
+        )
+        response_content = fallback_behavioral_question()
+
+    append_assistant_response(
+        state,
+        response_content
+    )
+    log_agent_output(
+        INTERVIEWER_AGENT_NAME,
+        "default_question_node",
+        state,
+        response,
+        started_at,
+        output_override=response_content
     )
     return state
+
+
+INTERVIEWER_AGENT_NODES = {
+    "intro": generate_interview_intro_node,
+    "default_question": default_question_node,
+    "deep_technical": deep_technical_node,
+    "easier_question": easier_question_node,
+    "clarification": clarification_node,
+    "topic_transition": topic_transition_node,
+    "system_design": system_design_node,
+    "conduct_warning": conduct_warning_node,
+    "end_interview": end_interview_node,
+    "general_question": generate_interview_question_node
+}

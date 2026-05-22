@@ -35,6 +35,18 @@ def continue_interview_chat(
             "Interview session not found"
         )
 
+    if interview_session.status == "submitted":
+        logger.warning(
+            (
+                "submitted_interview_chat_rejected "
+                "interview_id=%s"
+            ),
+            interview_id
+        )
+        raise Exception(
+            "Interview has already been submitted"
+        )
+
     existing_messages = (
         db.query(InterviewMessage)
         .filter(
@@ -57,11 +69,45 @@ def continue_interview_chat(
             }
         )
 
+    try:
+
+        candidate_message = InterviewMessage(
+            interview_id=interview_id,
+            role="user",
+            message=user_message
+        )
+
+        db.add(candidate_message)
+
+        db.commit()
+
+    except Exception:
+
+        db.rollback()
+
+        logger.exception(
+            (
+                "persist_candidate_message_failed "
+                "interview_id=%s"
+            ),
+            interview_id
+        )
+
+        raise
+
     messages.append(
         {
             "role": "user",
             "content": user_message
         }
+    )
+
+    logger.info(
+        (
+            "candidate_message_persisted "
+            "interview_id=%s"
+        ),
+        interview_id
     )
 
     initial_state = {
@@ -83,6 +129,10 @@ def continue_interview_chat(
 
         "interview_type": (
             interview_session.interview_type
+        ),
+
+        "interview_mode": (
+            interview_session.interview_mode
         ),
 
         "messages": messages,

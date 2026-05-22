@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getApiHealth } from "@/lib/api";
+import { getApiHealth } from "@/utils/api/global";
 
 export function HomeHealth() {
   const [status, setStatus] = useState<"checking" | "online" | "offline">("checking");

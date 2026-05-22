@@ -8,4 +8,5 @@ export type StoredInterviewSession = {
   resumeName: string;
   firstQuestion: string;
   startedAt: string;
+  status?: "active" | "submitted";
 };

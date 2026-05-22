@@ -2,7 +2,9 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setupInterview, startInterview, uploadResume } from "@/lib/api";
+import { setupInterview, startInterview } from "@/utils/api/chat";
+import { getApiErrorMessage } from "@/utils/api/client";
+import { uploadResume } from "@/utils/api/resume";
 import type { InterviewMode, InterviewType, Difficulty } from "@/types/api";
 
 const roleOptions = [
@@ -46,7 +48,7 @@ export default function SetupPage() {
       setResumeId(response.resume_id);
       setResumeName(response.filename);
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Resume upload failed");
+      setError(getApiErrorMessage(uploadError, "Resume upload failed"));
     } finally {
       setIsUploading(false);
     }
@@ -90,7 +92,7 @@ export default function SetupPage() {
 
       router.push(`/interview/${setupResponse.interview_id}`);
     } catch (setupError) {
-      setError(setupError instanceof Error ? setupError.message : "Could not start interview");
+      setError(getApiErrorMessage(setupError, "Could not start interview"));
     } finally {
       setIsStarting(false);
     }
