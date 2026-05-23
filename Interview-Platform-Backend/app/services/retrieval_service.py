@@ -77,3 +77,29 @@ def retrieve_relevant_resume_chunks(
         chunk.chunk_text
         for chunk in chunks
     ]
+
+def retrieve_full_resume_context(
+    db: Session,
+    resume_id: str,
+    top_k: int = 15
+):
+
+    stmt = (
+        select(ResumeChunk)
+        .where(
+            ResumeChunk.resume_id == resume_id
+        )
+        .order_by(
+            ResumeChunk.chunk_order.asc()
+        )
+        .limit(top_k)
+    )
+
+    results = db.execute(stmt)
+
+    chunks = results.scalars().all()
+
+    return [
+        chunk.chunk_text
+        for chunk in chunks
+    ]

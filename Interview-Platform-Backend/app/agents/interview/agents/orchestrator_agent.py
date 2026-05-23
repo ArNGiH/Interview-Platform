@@ -1,4 +1,3 @@
-import json
 from time import perf_counter
 
 from langchain_core.messages import (
@@ -16,20 +15,29 @@ from app.agents.interview.state import (
     InterviewState
 )
 
+from app.agents.interview.schemas import (
+    QuestionStrategyOutput
+)
+
 from app.services.llm_service import (
     get_llm
 )
 
 from app.agents.interview.agents.common import (
     compact_for_log,
+    model_dump_for_prompt,
+    normalize_structured_output,
     state_upper,
-    usage_metadata
+    structured_get
 )
 
 
 ORCHESTRATOR_AGENT_NAME = "Strategy Orchestrator Agent"
 
 llm = get_llm()
+structured_llm = llm.with_structured_output(
+    QuestionStrategyOutput
+)
 
 
 def question_strategy_node(
@@ -40,28 +48,21 @@ def question_strategy_node(
 
     candidate_evaluation = state.get(
         "candidate_evaluation",
-        {}
     )
 
     evaluation_text = (
-        candidate_evaluation.get(
-            "evaluation",
-            ""
-        )
+        structured_get(candidate_evaluation, "summary", "")
     )
 
     previous_question = (
-        candidate_evaluation.get(
-            "question",
-            ""
-        )
+        structured_get(candidate_evaluation, "question", "")
     )
 
     candidate_answer = (
-        candidate_evaluation.get(
-            "answer",
-            ""
-        )
+        structured_get(candidate_evaluation, "answer", "")
+    )
+    resume_analysis = state.get(
+        "resume_analysis"
     )
 
     prompt = QUESTION_STRATEGY_PROMPT.format(
@@ -83,6 +84,7 @@ def question_strategy_node(
             "difficulty",
             "medium"
         ),
+        resume_analysis=model_dump_for_prompt(resume_analysis),
         question_count=state.get(
             "question_count",
             0
@@ -94,7 +96,7 @@ def question_strategy_node(
 
     try:
 
-        response = llm.invoke(
+        raw_strategy_response = structured_llm.invoke(
             [
                 SystemMessage(
                     content=prompt
@@ -106,6 +108,10 @@ def question_strategy_node(
                     )
                 )
             ]
+        )
+        strategy_response = normalize_structured_output(
+            raw_strategy_response,
+            QuestionStrategyOutput
         )
 
     except Exception:
@@ -123,10 +129,6 @@ def question_strategy_node(
 
         raise
 
-    strategy_response = json.loads(
-        response.content
-    )
-
     state["question_strategy"] = strategy_response
 
     logger.info(
@@ -138,33 +140,23 @@ def question_strategy_node(
             "difficulty_level=%s "
             "should_explain=%s "
             "should_end_interview=%s "
+            "next_node=%s "
             "duration_ms=%s "
-            "usage=%s "
             "output=%s"
         ),
         state.get(
             "question_count",
             0
         ),
-        strategy_response.get(
-            "strategy_type"
-        ),
-        strategy_response.get(
-            "user_intent"
-        ),
-        strategy_response.get(
-            "difficulty_level"
-        ),
-        strategy_response.get(
-            "should_explain"
-        ),
-        strategy_response.get(
-            "should_end_interview"
-        ),
+        strategy_response.strategy_type,
+        strategy_response.user_intent,
+        strategy_response.difficulty_level,
+        strategy_response.should_explain,
+        strategy_response.should_end_interview,
+        strategy_response.next_node,
         int((perf_counter() - started_at) * 1000),
-        usage_metadata(response),
         compact_for_log(
-            response.content
+            str(strategy_response.model_dump())
         )
     )
 

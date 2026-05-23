@@ -1,42 +1,20 @@
-import json
-import re
 from time import perf_counter
 
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 
 from app.core.logger import logger
+from app.agents.interview.agents.common import normalize_structured_output
 from app.agents.interview.prompts import FEEDBACK_AGENT_PROMPT
+from app.agents.interview.schemas import FeedbackReportOutput
 from app.services.llm_service import get_llm
 
 
 FEEDBACK_AGENT_NAME = "Feedback Agent"
 
-
-def _extract_json_object(text: str):
-
-    cleaned_text = re.sub(
-        r"^```(?:json)?|```$",
-        "",
-        text.strip(),
-        flags=re.MULTILINE
-    ).strip()
-
-    try:
-        return json.loads(cleaned_text)
-    except json.JSONDecodeError:
-        match = re.search(
-            r"\{.*\}",
-            cleaned_text,
-            flags=re.DOTALL
-        )
-
-        if match:
-            return json.loads(
-                match.group(0)
-            )
-
-        raise
+structured_llm = get_llm().with_structured_output(
+    FeedbackReportOutput
+)
 
 
 def _fallback_feedback_report():
@@ -96,38 +74,35 @@ def generate_interview_feedback_report(
     """
 
     try:
-        response = get_llm().invoke(
-            [
-                SystemMessage(
-                    content=FEEDBACK_AGENT_PROMPT
-                ),
-                HumanMessage(
-                    content=prompt
-                )
-            ]
-        )
-
-        report = _extract_json_object(
-            response.content
+        report = normalize_structured_output(
+            structured_llm.invoke(
+                [
+                    SystemMessage(
+                        content=FEEDBACK_AGENT_PROMPT
+                    ),
+                    HumanMessage(
+                        content=prompt
+                    )
+                ]
+            ),
+            FeedbackReportOutput
         )
 
         logger.info(
             (
                 "feedback_agent_completed "
                 "interview_id=%s "
-                "duration_ms=%s "
-                "usage=%s"
+                "recommendation=%s "
+                "confidence=%s "
+                "duration_ms=%s"
             ),
             interview_session.id,
+            report.hiring_recommendation,
+            report.confidence_level,
             int((perf_counter() - started_at) * 1000),
-            getattr(
-                response,
-                "usage_metadata",
-                None
-            )
         )
 
-        return report
+        return report.model_dump()
 
     except Exception:
         logger.exception(

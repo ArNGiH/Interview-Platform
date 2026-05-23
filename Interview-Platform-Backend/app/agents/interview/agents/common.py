@@ -3,6 +3,8 @@ import os
 import re
 from time import perf_counter
 
+from pydantic import BaseModel
+
 from app.agents.interview.state import InterviewState
 from app.core.logger import logger
 
@@ -43,6 +45,52 @@ def compact_for_log(text: str | None, max_chars: int = LLM_LOG_OUTPUT_CHARS):
         compact_text = compact_text[:max_chars] + "...[truncated]"
 
     return json.dumps(compact_text)
+
+
+def model_dump_for_prompt(value):
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+
+    return value or {}
+
+
+def normalize_structured_output(response, schema):
+    if isinstance(response, schema):
+        return response
+
+    parsed = getattr(response, "parsed", None)
+
+    if isinstance(parsed, schema):
+        return parsed
+
+    if isinstance(response, dict):
+        parsed = response.get("parsed")
+
+        if isinstance(parsed, schema):
+            return parsed
+
+        return schema.model_validate(response)
+
+    field_values = {}
+
+    for field_name in schema.model_fields:
+        if hasattr(response, field_name):
+            field_values[field_name] = getattr(response, field_name)
+
+    if field_values:
+        return schema.model_validate(field_values)
+
+    return schema.model_validate(response)
+
+
+def structured_get(value, key: str, default=None):
+    if isinstance(value, BaseModel):
+        return getattr(value, key, default)
+
+    if isinstance(value, dict):
+        return value.get(key, default)
+
+    return default
 
 
 def usage_metadata(response):
@@ -95,8 +143,14 @@ def log_agent_output(
     content = (
         output_override
         if output_override is not None
-        else getattr(response, "content", response)
+        else getattr(
+            response,
+            "content",
+            getattr(response, "message", response)
+        )
     )
+
+    content = str(content or "")
 
     logger.info(
         (

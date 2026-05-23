@@ -2,6 +2,8 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import Query
 
+from fastapi.responses import StreamingResponse
+
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_db
@@ -106,30 +108,34 @@ def interview_feedback_api(
     }
 
 @router.post("/start")
-def start_interview_api(
+async def start_interview_api(
     payload: StartInterviewRequest,
     db: Session = Depends(get_db)
 ):
-
-    response = start_interview(
+    stream = start_interview(
         db=db,
         interview_id=str(
             payload.interview_id
         )
     )
-
-    return response
+    return StreamingResponse(
+        stream,
+        media_type="text/plain"
+    )
 
 @router.post("/chat")
-def interview_chat(
+async def interview_chat(
     payload: InterviewChatRequest,
     db: Session = Depends(get_db)
 ):
 
-    response = continue_interview_chat(
+    stream = continue_interview_chat(
         db=db,
         interview_id=payload.interview_id,
         user_message=payload.message
     )
 
-    return response
+    return StreamingResponse(
+        stream,
+        media_type="text/plain"
+    )

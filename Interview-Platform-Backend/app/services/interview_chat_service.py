@@ -3,9 +3,19 @@ from app.core.logger import logger
 from app.models.interview_session import InterviewSession
 from app.models.interview_message import InterviewMessage
 from app.agents.interview.graph import build_interview_graph
+from app.agents.interview.agents.interviewer_agent import (
+    astream_interviewer_turn
+)
+from app.agents.interview.agents.common import (
+    append_assistant_response
+)
+
+from app.agents.interview.agents.persistence_agent import (
+    persist_interview_state_node
+)
 
 
-def continue_interview_chat(
+async def continue_interview_chat(
     db: Session,
     interview_id: str,
     user_message: str
@@ -183,6 +193,44 @@ def continue_interview_chat(
         initial_state,
         config=config
     )
+    streaming_prompt = final_state.get(
+        "streaming_prompt"
+    )
+
+    streaming_instruction = final_state.get(
+        "streaming_instruction"
+    )
+
+    if not streaming_prompt:
+
+        raise Exception(
+            "Streaming prompt missing from graph state"
+        )
+
+    full_response = ""
+
+    async for token in astream_interviewer_turn(
+        streaming_prompt,
+        streaming_instruction
+    ):
+
+        full_response += token
+
+        yield token
+
+    final_state["current_question"] = (
+        full_response
+    )
+
+    append_assistant_response(
+        final_state,
+        full_response
+    )
+
+    persist_interview_state_node(
+        final_state,
+        db
+    )
 
     logger.info(
         (
@@ -195,11 +243,3 @@ def continue_interview_chat(
             "question_count"
         )
     )
-
-    return {
-        "interview_id": interview_id,
-
-        "question": final_state.get(
-            "current_question"
-        )
-    }

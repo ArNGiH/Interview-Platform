@@ -24,6 +24,7 @@ from app.agents.interview.state import (
     InterviewState
 )
 
+
 from app.services.llm_service import (
     get_llm
 )
@@ -35,7 +36,9 @@ from app.agents.interview.agents.common import (
     has_behavioral_technical_leak,
     is_behavioral_interview,
     log_agent_output,
+    model_dump_for_prompt,
     state_upper,
+    structured_get,
     usage_metadata
 )
 
@@ -43,6 +46,35 @@ from app.agents.interview.agents.common import (
 INTERVIEWER_AGENT_NAME = "Interviewer Agent"
 
 llm = get_llm()
+
+async def astream_interviewer_turn(
+    prompt: str,
+    instruction: str
+):
+
+    async for chunk in llm.astream(
+        [
+            SystemMessage(content=prompt),
+            HumanMessage(content=instruction)
+        ]
+    ):
+
+        if chunk.content:
+            yield chunk.content
+
+def _invoke_interviewer_turn(
+    prompt: str,
+    instruction: str
+):
+
+    response = llm.invoke(
+        [
+            SystemMessage(content=prompt),
+            HumanMessage(content=instruction)
+        ]
+    )
+
+    return response.content
 
 
 def generate_interview_intro_node(
@@ -81,53 +113,25 @@ def generate_interview_intro_node(
     Generate the interview opening message.
     """
 
-    try:
+    state["streaming_prompt"] = prompt
 
-        response = llm.invoke(
-            [
-                SystemMessage(
-                    content=prompt
-                ),
-                HumanMessage(
-                    content=(
-                        "Generate only the interviewer introduction."
-                    )
-                )
-            ]
-        )
-
-    except Exception:
-
-        logger.exception(
-            "interview_intro_generation_failed"
-        )
-
-        raise
-
-    generated_intro = response.content
-
-    append_assistant_response(
-        state,
-        generated_intro
+    state["streaming_instruction"] = (
+        "Generate only the interviewer introduction."
     )
 
     logger.info(
         (
-            "interview_node_output "
+            "streaming_payload_prepared "
             "node=generate_interview_intro "
             "interview_id=%s "
-            "response_chars=%s "
             "duration_ms=%s "
-            "usage=%s "
-            "output=%s"
+            "prompt_chars=%s"
         ),
         state.get(
             "interview_id"
         ),
-        len(generated_intro or ""),
         int((perf_counter() - started_at) * 1000),
-        usage_metadata(response),
-        compact_for_log(generated_intro)
+        len(prompt or "")
     )
 
     return state
@@ -152,40 +156,26 @@ def generate_interview_question_node(
 
     candidate_evaluation = state.get(
         "candidate_evaluation",
-        {}
     )
 
     evaluation_text = (
-        candidate_evaluation.get(
-            "evaluation",
-            ""
-        )
+        structured_get(candidate_evaluation, "summary", "")
     )
 
     previous_question = (
-        candidate_evaluation.get(
-            "question",
-            ""
-        )
+        structured_get(candidate_evaluation, "question", "")
     )
 
     candidate_answer = (
-        candidate_evaluation.get(
-            "answer",
-            ""
-        )
+        structured_get(candidate_evaluation, "answer", "")
     )
 
     question_strategy = state.get(
-        "question_strategy",
-        {}
+        "question_strategy"
     )
 
     strategy_text = (
-        question_strategy.get(
-            "strategy_type",
-            ""
-        )
+        structured_get(question_strategy, "strategy_type", "")
     )
 
     prompt = INTERVIEW_SYSTEM_PROMPT.format(
@@ -213,52 +203,15 @@ def generate_interview_question_node(
         question_count=question_count
     )
 
-    try:
+    state["streaming_prompt"] = prompt
 
-        response = llm.invoke(
-            [
-                SystemMessage(
-                    content=prompt
-                ),
-                HumanMessage(
-                    content=(
-                        "Generate the next "
-                        "interview question."
-                    )
-                )
-            ]
-        )
-
-    except Exception:
-
-        logger.exception(
-            (
-                "interview_question_generation_failed "
-                "question_count=%s "
-                "retrieved_chunks=%s"
-            ),
-            question_count,
-            len(
-                state.get(
-                    "retrieved_chunks",
-                    []
-                )
-            )
-        )
-
-        raise
-
-    generated_question = (
-        response.content
-    )
-
-    append_assistant_response(
-        state,
-        generated_question
+    state["streaming_instruction"] = (
+        "Generate the next interview question."
     )
 
     strategy_reason = (
-        question_strategy.get(
+        structured_get(
+            question_strategy,
             "reasoning",
             ""
         )
@@ -266,23 +219,19 @@ def generate_interview_question_node(
 
     logger.info(
         (
-            "interview_node_output "
+            "streaming_payload_prepared "
             "node=generate_interview_question "
             "question_count=%s "
             "strategy=%s "
             "strategy_reason=%s "
-            "response_chars=%s "
             "duration_ms=%s "
-            "usage=%s "
-            "output=%s"
+            "prompt_chars=%s"
         ),
-        state["question_count"],
+        question_count,
         strategy_text,
-        compact_for_log(strategy_reason, max_chars=300),
-        len(generated_question or ""),
+        compact_for_log(strategy_reason),
         int((perf_counter() - started_at) * 1000),
-        usage_metadata(response),
-        compact_for_log(generated_question)
+        len(prompt or "")
     )
 
     return state
@@ -294,8 +243,6 @@ def clarification_node(state):
     logger.info(
         "clarification_node_started"
     )
-
-    llm = get_llm()
 
     previous_question = (
         state["messages"][-2]["content"]
@@ -312,8 +259,7 @@ def clarification_node(state):
 
     question_strategy = (
         state.get(
-            "question_strategy",
-            {}
+            "question_strategy"
         )
     )
 
@@ -323,24 +269,35 @@ def clarification_node(state):
         ),
         previous_question=previous_question,
         candidate_answer=candidate_answer,
-        reasoning=question_strategy.get(
+        reasoning=structured_get(
+            question_strategy,
             "reasoning"
         )
     )
-    response = llm.invoke(prompt)
-    append_assistant_response(
-        state,
-        response.content
+
+    state["streaming_prompt"] = prompt
+
+    state["streaming_instruction"] = (
+        "Generate the clarification turn."
     )
-    log_agent_output(
-        INTERVIEWER_AGENT_NAME,
-        "clarification_node",
-        state,
-        response,
-        started_at
+
+    logger.info(
+        (
+            "streaming_payload_prepared "
+            "node=clarification_node "
+            "interview_id=%s "
+            "duration_ms=%s "
+            "prompt_chars=%s"
+        ),
+        state.get(
+            "interview_id"
+        ),
+        int((perf_counter() - started_at) * 1000),
+        len(prompt or "")
     )
 
     return state
+
 
 def easier_question_node(state):
 
@@ -351,6 +308,7 @@ def easier_question_node(state):
     )
 
     if is_behavioral_interview(state):
+
         logger.info(
             (
                 "easier_question_redirected "
@@ -358,25 +316,23 @@ def easier_question_node(state):
                 "target_node=default_question_node"
             )
         )
+
         return default_question_node(
             state
         )
 
-    llm = get_llm()
-
     question_strategy = (
         state.get(
-            "question_strategy",
-            {}
+            "question_strategy"
         )
     )
 
     evaluation = (
         state.get(
-            "candidate_evaluation",
-            {}
+            "candidate_evaluation"
         )
     )
+
     prompt = EASY_RECOVERY_PROMPT.format(
         current_topic=state.get(
             "current_topic"
@@ -394,23 +350,36 @@ def easier_question_node(state):
             "difficulty",
             "medium"
         ),
-        evaluation=evaluation,
-        reasoning=question_strategy.get(
+        evaluation=model_dump_for_prompt(
+            evaluation
+        ),
+        reasoning=structured_get(
+            question_strategy,
             "reasoning"
         )
     )
-    response = llm.invoke(prompt)
-    append_assistant_response(
-        state,
-        response.content
+
+    state["streaming_prompt"] = prompt
+
+    state["streaming_instruction"] = (
+        "Generate an easier recovery question."
     )
-    log_agent_output(
-        INTERVIEWER_AGENT_NAME,
-        "easier_question_node",
-        state,
-        response,
-        started_at
+
+    logger.info(
+        (
+            "streaming_payload_prepared "
+            "node=easier_question_node "
+            "interview_id=%s "
+            "duration_ms=%s "
+            "prompt_chars=%s"
+        ),
+        state.get(
+            "interview_id"
+        ),
+        int((perf_counter() - started_at) * 1000),
+        len(prompt or "")
     )
+
     return state
 
 def deep_technical_node(state):
@@ -420,30 +389,32 @@ def deep_technical_node(state):
     logger.info(
         "deep_technical_node_started"
     )
-    llm = get_llm()
+
     previous_question = (
         state["messages"][-2]["content"]
         if len(state["messages"]) >= 2
         else ""
     )
+
     candidate_answer = (
         state.get(
             "latest_user_message",
             ""
         )
     )
+
     evaluation = (
         state.get(
-            "candidate_evaluation",
-            {}
+            "candidate_evaluation"
         )
     )
+
     question_strategy = (
         state.get(
-            "question_strategy",
-            {}
+            "question_strategy"
         )
     )
+
     prompt = DEEP_TECHNICAL_PROMPT.format(
         interview_role=state.get(
             "interview_role"
@@ -465,25 +436,38 @@ def deep_technical_node(state):
         ),
         previous_question=previous_question,
         candidate_answer=candidate_answer,
-        evaluation=evaluation,
-        reasoning=question_strategy.get(
+        evaluation=model_dump_for_prompt(
+            evaluation
+        ),
+        reasoning=structured_get(
+            question_strategy,
             "reasoning"
         )
     )
-    response = llm.invoke(prompt)
-    append_assistant_response(
-        state,
-        response.content
+
+    state["streaming_prompt"] = prompt
+
+    state["streaming_instruction"] = (
+        "Generate a progressive technical follow-up question."
     )
-    log_agent_output(
-        INTERVIEWER_AGENT_NAME,
-        "deep_technical_node",
-        state,
-        response,
-        started_at
+
+    logger.info(
+        (
+            "streaming_payload_prepared "
+            "node=deep_technical_node "
+            "interview_id=%s "
+            "duration_ms=%s "
+            "prompt_chars=%s"
+        ),
+        state.get(
+            "interview_id"
+        ),
+        int((perf_counter() - started_at) * 1000),
+        len(prompt or "")
     )
 
     return state
+
 
 def topic_transition_node(state):
 
@@ -492,14 +476,14 @@ def topic_transition_node(state):
     logger.info(
         "topic_transition_node_started"
     )
+
     next_topic = (
-        state.get(
-            "question_strategy",
-            {}
-        ).get(
+        structured_get(
+            state.get("question_strategy"),
             "next_topic"
         )
     )
+
     if next_topic:
 
         state["current_topic"] = (
@@ -516,9 +500,11 @@ def topic_transition_node(state):
         topic_history.append(
             next_topic
         )
+
         state["topic_history"] = (
             topic_history
         )
+
     logger.info(
         (
             "interview_node_output "
@@ -538,7 +524,9 @@ def topic_transition_node(state):
         ),
         int((perf_counter() - started_at) * 1000)
     )
+
     if is_behavioral_interview(state):
+
         return default_question_node(
             state
         )
@@ -555,19 +543,15 @@ def system_design_node(state):
         "system_design_node_started"
     )
 
-    llm = get_llm()
-
     question_strategy = (
         state.get(
-            "question_strategy",
-            {}
+            "question_strategy"
         )
     )
 
     evaluation = (
         state.get(
-            "candidate_evaluation",
-            {}
+            "candidate_evaluation"
         )
     )
 
@@ -591,24 +575,38 @@ def system_design_node(state):
         current_topic=state.get(
             "current_topic"
         ),
-        evaluation=evaluation,
-        reasoning=question_strategy.get(
+        evaluation=model_dump_for_prompt(
+            evaluation
+        ),
+        reasoning=structured_get(
+            question_strategy,
             "reasoning"
         )
     )
-    response = llm.invoke(prompt)
-    append_assistant_response(
-        state,
-        response.content
+
+    state["streaming_prompt"] = prompt
+
+    state["streaming_instruction"] = (
+        "Generate one system design interview question."
     )
-    log_agent_output(
-        INTERVIEWER_AGENT_NAME,
-        "system_design_node",
-        state,
-        response,
-        started_at
+
+    logger.info(
+        (
+            "streaming_payload_prepared "
+            "node=system_design_node "
+            "interview_id=%s "
+            "duration_ms=%s "
+            "prompt_chars=%s"
+        ),
+        state.get(
+            "interview_id"
+        ),
+        int((perf_counter() - started_at) * 1000),
+        len(prompt or "")
     )
+
     return state
+
 
 def conduct_warning_node(state):
 
@@ -618,47 +616,56 @@ def conduct_warning_node(state):
         "conduct_warning_node_started"
     )
 
-    llm = get_llm()
-
     previous_question = (
         state["messages"][-2]["content"]
         if len(state["messages"]) >= 2
         else ""
     )
+
     candidate_answer = (
         state.get(
             "latest_user_message",
             ""
         )
     )
+
     question_strategy = (
         state.get(
-            "question_strategy",
-            {}
+            "question_strategy"
         )
     )
+
     prompt = CONDUCT_WARNING_PROMPT.format(
         previous_question=previous_question,
         candidate_answer=candidate_answer,
-        reasoning=question_strategy.get(
+        reasoning=structured_get(
+            question_strategy,
             "reasoning"
         )
     )
-    response = llm.invoke(prompt)
-    append_assistant_response(
-        state,
-        response.content
+
+    state["streaming_prompt"] = prompt
+
+    state["streaming_instruction"] = (
+        "Generate the conduct warning."
     )
-    log_agent_output(
-        INTERVIEWER_AGENT_NAME,
-        "conduct_warning_node",
-        state,
-        response,
-        started_at
+
+    logger.info(
+        (
+            "streaming_payload_prepared "
+            "node=conduct_warning_node "
+            "interview_id=%s "
+            "duration_ms=%s "
+            "prompt_chars=%s"
+        ),
+        state.get(
+            "interview_id"
+        ),
+        int((perf_counter() - started_at) * 1000),
+        len(prompt or "")
     )
 
     return state
-
 def end_interview_node(state):
 
     started_at = perf_counter()
@@ -666,39 +673,51 @@ def end_interview_node(state):
     logger.info(
         "end_interview_node_started"
     )
-    llm = get_llm()
+
     candidate_answer = (
         state.get(
             "latest_user_message",
             ""
         )
     )
+
     question_strategy = (
         state.get(
-            "question_strategy",
-            {}
+            "question_strategy"
         )
     )
+
     prompt = END_INTERVIEW_PROMPT.format(
         candidate_answer=candidate_answer,
-        reasoning=question_strategy.get(
+        reasoning=structured_get(
+            question_strategy,
             "reasoning"
         )
     )
-    response = llm.invoke(prompt)
-    append_assistant_response(
-        state,
-        response.content
+
+    state["streaming_prompt"] = prompt
+
+    state["streaming_instruction"] = (
+        "Generate the closing interviewer message."
     )
-    log_agent_output(
-        INTERVIEWER_AGENT_NAME,
-        "end_interview_node",
-        state,
-        response,
-        started_at
+
+    logger.info(
+        (
+            "streaming_payload_prepared "
+            "node=end_interview_node "
+            "interview_id=%s "
+            "duration_ms=%s "
+            "prompt_chars=%s"
+        ),
+        state.get(
+            "interview_id"
+        ),
+        int((perf_counter() - started_at) * 1000),
+        len(prompt or "")
     )
 
     return state
+
 
 def default_question_node(state):
 
@@ -707,8 +726,6 @@ def default_question_node(state):
     logger.info(
         "default_question_node_started"
     )
-
-    llm = get_llm()
 
     previous_question = (
         state["messages"][-2]["content"]
@@ -725,15 +742,13 @@ def default_question_node(state):
 
     evaluation = (
         state.get(
-            "candidate_evaluation",
-            {}
+            "candidate_evaluation"
         )
     )
 
     question_strategy = (
         state.get(
-            "question_strategy",
-            {}
+            "question_strategy"
         )
     )
 
@@ -769,44 +784,36 @@ def default_question_node(state):
         ),
         previous_question=previous_question,
         candidate_answer=candidate_answer,
-        evaluation=evaluation,
-        reasoning=question_strategy.get(
+        evaluation=model_dump_for_prompt(
+            evaluation
+        ),
+        reasoning=structured_get(
+            question_strategy,
             "reasoning"
         )
     )
-    response = llm.invoke(prompt)
 
-    response_content = response.content
+    state["streaming_prompt"] = prompt
 
-    if (
-        is_behavioral_interview(state)
-        and has_behavioral_technical_leak(response_content)
-    ):
-        logger.warning(
-            (
-                "behavioral_question_rewritten "
-                "reason=technical_language_detected "
-                "interview_id=%s original_output=%s"
-            ),
-            state.get(
-                "interview_id"
-            ),
-            compact_for_log(response_content)
-        )
-        response_content = fallback_behavioral_question()
-
-    append_assistant_response(
-        state,
-        response_content
+    state["streaming_instruction"] = (
+        "Generate the next interviewer question."
     )
-    log_agent_output(
-        INTERVIEWER_AGENT_NAME,
-        "default_question_node",
-        state,
-        response,
-        started_at,
-        output_override=response_content
+
+    logger.info(
+        (
+            "streaming_payload_prepared "
+            "node=default_question_node "
+            "interview_id=%s "
+            "duration_ms=%s "
+            "prompt_chars=%s"
+        ),
+        state.get(
+            "interview_id"
+        ),
+        int((perf_counter() - started_at) * 1000),
+        len(prompt or "")
     )
+
     return state
 
 

@@ -1,79 +1,127 @@
 from time import perf_counter
 
+from langchain_core.messages import (
+    SystemMessage,
+    HumanMessage
+)
+
 from app.core.logger import logger
 
 from app.agents.interview.state import (
     InterviewState
 )
 
+from app.agents.interview.prompts import (
+    RESUME_ANALYSIS_PROMPT
+)
+
+from app.agents.interview.schemas import (
+    ResumeAnalysisOutput
+)
+
+from app.services.llm_service import (
+    get_llm
+)
+
 from app.services.retrieval_service import (
-    retrieve_relevant_resume_chunks
+    retrieve_full_resume_context
+)
+
+from app.agents.interview.agents.common import (
+    compact_for_log,
+    normalize_structured_output
 )
 
 
-RESUME_ANALYSIS_AGENT_NAME = "Resume Analysis Agent"
+RESUME_ANALYSIS_AGENT_NAME = (
+    "Resume Analysis Agent"
+)
+
+llm = get_llm()
 
 
-def retrieve_resume_context_node(
+structured_llm = llm.with_structured_output(
+    ResumeAnalysisOutput
+)
+
+
+def analyze_resume_node(
     state: InterviewState,
     db
 ):
 
     started_at = perf_counter()
 
-
     resume_id = state.get(
         "resume_id"
     )
 
-    question_count = state.get(
-        "question_count",
-        0
-    )
-
-    retrieval_query = f"""
-    Interview questions for:
-    {state.get("latest_user_message", "")}
-    """
-
     try:
 
         retrieved_chunks = (
-            retrieve_relevant_resume_chunks(
+            retrieve_full_resume_context(
                 db=db,
-                resume_id=resume_id,
-                query=retrieval_query,
-                top_k=5
+                resume_id=resume_id
             )
         )
 
     except Exception:
 
         logger.exception(
-            (
-                "resume_context_retrieval_failed "
-                "resume_id=%s question_count=%s"
-            ),
-            resume_id,
-            question_count
+            "resume_context_retrieval_failed"
         )
 
         raise
 
-    state["retrieved_chunks"] = (
+    resume_context = "\n\n".join(
         retrieved_chunks
     )
 
+    prompt = f"""
+    Candidate Resume Context:
+
+    {resume_context}
+
+    Analyze this candidate resume.
+    """
+
+    try:
+
+        raw_response = structured_llm.invoke(
+            [
+                SystemMessage(
+                    content=RESUME_ANALYSIS_PROMPT
+                ),
+                HumanMessage(
+                    content=prompt
+                )
+            ]
+        )
+        response = normalize_structured_output(
+            raw_response,
+            ResumeAnalysisOutput
+        )
+
+    except Exception:
+
+        logger.exception(
+            "resume_analysis_failed"
+        )
+
+        raise
+    state["resume_analysis"] = response
     logger.info(
         (
-            "resume_context_retrieved "
-            "resume_id=%s question_count=%s "
-            "chunks=%s duration_ms=%s"
+            "resume_analysis_completed "
+            "interview_id=%s "
+            "duration_ms=%s "
+            "analysis=%s"
         ),
-        resume_id,
-        question_count,
-        len(retrieved_chunks),
-        int((perf_counter() - started_at) * 1000)
+        state.get("interview_id"),
+        int((perf_counter() - started_at) * 1000),
+        compact_for_log(
+            str(response.model_dump())
+        )
     )
 
     return state
