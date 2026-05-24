@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy.orm import Session
 from app.core.logger import logger
 from app.models.interview_session import InterviewSession
@@ -13,6 +15,10 @@ from app.agents.interview.agents.common import (
 from app.agents.interview.agents.persistence_agent import (
     persist_interview_state_node
 )
+
+
+def _stream_token(token: str):
+    return f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
 
 
 async def continue_interview_chat(
@@ -216,7 +222,7 @@ async def continue_interview_chat(
 
         full_response += token
 
-        yield token
+        yield _stream_token(token)
 
     final_state["current_question"] = (
         full_response

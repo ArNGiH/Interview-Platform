@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setupInterview, startInterview } from "@/utils/api/chat";
+import { cleanStreamedText, setupInterview, streamStartInterview } from "@/utils/api/chat";
 import { getApiErrorMessage } from "@/utils/api/client";
 import { uploadResume } from "@/utils/api/resume";
 import type { InterviewMode, InterviewType, Difficulty } from "@/types/api";
@@ -71,9 +71,19 @@ export default function SetupPage() {
         job_description_provided: Boolean(jobDescription.trim())
       });
 
-      const startResponse = await startInterview({
-        interview_id: setupResponse.interview_id
-      });
+      let firstQuestion = "";
+
+      await streamStartInterview(
+        {
+          interview_id: setupResponse.interview_id
+        },
+
+        (chunk) => {
+          firstQuestion += chunk;
+        }
+      );
+
+      const cleanFirstQuestion = cleanStreamedText(firstQuestion);
 
       sessionStorage.setItem(
         `interview:${setupResponse.interview_id}`,
@@ -85,7 +95,7 @@ export default function SetupPage() {
           interviewType,
           interviewMode,
           resumeName,
-          firstQuestion: startResponse.question,
+          firstQuestion: cleanFirstQuestion,
           startedAt: new Date().toISOString()
         })
       );

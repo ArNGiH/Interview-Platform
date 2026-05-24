@@ -1,4 +1,5 @@
 from time import perf_counter
+import asyncio
 
 from langchain_core.messages import (
     SystemMessage,
@@ -61,6 +62,7 @@ async def astream_interviewer_turn(
 
         if chunk.content:
             yield chunk.content
+            await asyncio.sleep(0)
 
 def _invoke_interviewer_turn(
     prompt: str,

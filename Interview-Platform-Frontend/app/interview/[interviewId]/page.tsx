@@ -4,8 +4,9 @@ import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
+  cleanStreamedText,
   getInterviewHistory,
-  sendInterviewMessage,
+  streamInterviewMessage,
   submitInterview
 } from "@/utils/api/chat";
 import { getApiErrorMessage } from "@/utils/api/client";
@@ -33,6 +34,12 @@ function formatStatus(value: StoredInterviewSession["status"]) {
   }
 
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+const ASSISTANT_STREAM_RENDER_INTERVAL_MS = 32;
+
+function splitRenderableStreamChunk(chunk: string) {
+  return chunk.match(/\s*\S+|\s+/g) || [];
 }
 
 export default function InterviewChatPage() {
@@ -82,7 +89,7 @@ export default function InterviewChatPage() {
           interviewMode: response.session.interview_mode,
           resumeName: response.session.resume_uploaded ? "Resume attached" : "",
           firstQuestion:
-            firstAssistantMessage?.content ||
+            cleanStreamedText(firstAssistantMessage?.content || "") ||
             "This interview is ready. Send your response to continue.",
           startedAt: response.session.created_at || new Date().toISOString(),
           status: response.session.status
@@ -92,7 +99,7 @@ export default function InterviewChatPage() {
           response.messages.map((message) => ({
             id: message.id,
             role: message.role,
-            content: message.content,
+            content: cleanStreamedText(message.content),
             createdAt: message.created_at || new Date().toISOString()
           }))
         );
@@ -148,23 +155,109 @@ export default function InterviewChatPage() {
       createdAt: new Date().toISOString()
     };
 
-    setMessages((currentMessages) => [...currentMessages, candidateMessage]);
+    setMessages((currentMessages) => [
+      ...currentMessages,
+      candidateMessage
+    ]);
+
+    const assistantMessageId = `${interviewId}:assistant:${Date.now()}`;
+    const assistantMessage: InterviewMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "Reviewing your answer and preparing the next question...",
+      createdAt: new Date().toISOString()
+    };
+
+    setMessages((currentMessages) => [
+      ...currentMessages,
+      assistantMessage
+    ]);
+
+    let fullResponse = "";
+    let visibleResponse = "";
+    let isStreamComplete = false;
+    let typingTimer: number | null = null;
+    let resolveTypingComplete: () => void = () => {};
+    const pendingRenderChunks: string[] = [];
+    const typingComplete = new Promise<void>((resolve) => {
+      resolveTypingComplete = resolve;
+    });
+
+    function updateAssistantMessage(content: string) {
+      setMessages((currentMessages) =>
+        currentMessages.map((message) => {
+          if (message.id === assistantMessageId) {
+            return {
+              ...message,
+              content
+            };
+          }
+
+          return message;
+        })
+      );
+    }
+
+    function scheduleTypingRender() {
+      if (typingTimer) {
+        return;
+      }
+
+      typingTimer = window.setTimeout(() => {
+        typingTimer = null;
+
+        const nextChunk = pendingRenderChunks.shift();
+
+        if (nextChunk) {
+          visibleResponse += nextChunk;
+          updateAssistantMessage(visibleResponse);
+        }
+
+        if (pendingRenderChunks.length > 0) {
+          scheduleTypingRender();
+          return;
+        }
+
+        if (isStreamComplete) {
+          resolveTypingComplete();
+        }
+      }, ASSISTANT_STREAM_RENDER_INTERVAL_MS);
+    }
 
     try {
-      const response = await sendInterviewMessage({
-        interview_id: interviewId,
-        message: trimmedDraft
-      });
+      await streamInterviewMessage(
+        {
+          interview_id: interviewId,
+          message: trimmedDraft
+        },
+        (chunk) => {
+          fullResponse += chunk;
+          pendingRenderChunks.push(...splitRenderableStreamChunk(chunk));
+          scheduleTypingRender();
+        }
+      );
 
-      const assistantMessage: InterviewMessage = {
-        id: `${interviewId}:assistant:${Date.now()}`,
-        role: "assistant",
-        content: response.question,
-        createdAt: new Date().toISOString()
-      };
+      isStreamComplete = true;
 
-      setMessages((currentMessages) => [...currentMessages, assistantMessage]);
+      if (pendingRenderChunks.length > 0) {
+        scheduleTypingRender();
+        await typingComplete;
+      } else {
+        updateAssistantMessage(fullResponse);
+        resolveTypingComplete();
+      }
     } catch (chatError) {
+      isStreamComplete = true;
+
+      if (typingTimer) {
+        window.clearTimeout(typingTimer);
+      }
+
+      if (fullResponse) {
+        updateAssistantMessage(fullResponse);
+      }
+
+      resolveTypingComplete();
       setError(getApiErrorMessage(chatError, "Message failed"));
       setDraft(trimmedDraft);
     } finally {
@@ -278,13 +371,6 @@ export default function InterviewChatPage() {
                 <div className="bubble">{message.content}</div>
               </article>
             ))}
-
-            {isSending ? (
-              <article className="message assistant">
-                <div className="message-meta">Interviewer</div>
-                <div className="bubble">Reviewing your answer and preparing the next question...</div>
-              </article>
-            ) : null}
 
             <div ref={messagesEndRef} />
           </div>

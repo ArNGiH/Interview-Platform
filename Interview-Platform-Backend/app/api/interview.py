@@ -120,7 +120,7 @@ async def start_interview_api(
     )
     return StreamingResponse(
         stream,
-        media_type="text/plain"
+        media_type="text/event-stream"
     )
 
 @router.post("/chat")
@@ -137,5 +137,5 @@ async def interview_chat(
 
     return StreamingResponse(
         stream,
-        media_type="text/plain"
+        media_type="text/event-stream"
     )
