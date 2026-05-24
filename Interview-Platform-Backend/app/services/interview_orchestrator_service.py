@@ -1,4 +1,8 @@
+import json
+
 from sqlalchemy.orm import Session
+
+from fastapi import HTTPException
 
 from app.core.logger import logger
 
@@ -10,10 +14,27 @@ from app.agents.interview.start_graph import (
     build_start_interview_graph
 )
 
+from app.agents.interview.agents.interviewer_agent import (
+    astream_interviewer_turn
+)
 
-def start_interview(
+from app.agents.interview.agents.common import (
+    append_assistant_response
+)
+
+from app.agents.interview.agents.persistence_agent import (
+    persist_interview_state_node
+)
+
+
+def _stream_token(token: str):
+    return f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+
+
+async def start_interview(
     db: Session,
-    interview_id: str
+    interview_id: str,
+    user_id
 ):
 
     logger.info(
@@ -24,7 +45,8 @@ def start_interview(
     interview_session = (
         db.query(InterviewSession)
         .filter(
-            InterviewSession.id == interview_id
+            InterviewSession.id == interview_id,
+            InterviewSession.user_id == user_id
         )
         .first()
     )
@@ -39,11 +61,13 @@ def start_interview(
             interview_id
         )
 
-        raise Exception(
-            "Interview session not found"
+        raise HTTPException(
+            status_code=404,
+            detail="Interview session not found"
         )
 
     if interview_session.status == "submitted":
+
         logger.warning(
             (
                 "submitted_interview_start_rejected "
@@ -51,8 +75,10 @@ def start_interview(
             ),
             interview_id
         )
-        raise Exception(
-            "Interview has already been submitted"
+
+        raise HTTPException(
+            status_code=409,
+            detail="Interview has already been submitted"
         )
 
     initial_state = {
@@ -62,9 +88,10 @@ def start_interview(
         ),
 
         "interview_role": (
-        interview_session.role
-    ),
-         "difficulty": (
+            interview_session.role
+        ),
+
+        "difficulty": (
             interview_session.difficulty
         ),
 
@@ -98,7 +125,11 @@ def start_interview(
 
         "current_question": None,
 
-        "question_count": 0
+        "question_count": 0,
+
+        "streaming_prompt": None,
+
+        "streaming_instruction": None
     }
 
     config = {
@@ -130,6 +161,45 @@ def start_interview(
         )
     )
 
+    streaming_prompt = final_state.get(
+        "streaming_prompt"
+    )
+
+    streaming_instruction = final_state.get(
+        "streaming_instruction"
+    )
+
+    if not streaming_prompt:
+
+        raise Exception(
+            "Streaming prompt missing from graph state"
+        )
+
+    full_response = ""
+
+    async for token in astream_interviewer_turn(
+        streaming_prompt,
+        streaming_instruction
+    ):
+
+        full_response += token
+
+        yield _stream_token(token)
+
+    final_state["current_question"] = (
+        full_response
+    )
+
+    append_assistant_response(
+        final_state,
+        full_response
+    )
+
+    persist_interview_state_node(
+        final_state,
+        db
+    )
+
     logger.info(
         (
             "interview_graph_completed "
@@ -141,14 +211,3 @@ def start_interview(
             "question_count"
         )
     )
-
-    return {
-
-        "interview_id": str(
-            interview_session.id
-        ),
-
-        "question": final_state.get(
-            "current_question"
-        )
-    }

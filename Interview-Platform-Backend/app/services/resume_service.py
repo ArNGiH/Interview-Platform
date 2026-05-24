@@ -16,13 +16,10 @@ from app.services.rag_service import (
     generate_embeddings
 )
 
-
-DUMMY_USER_ID = "fb341b60-f05b-4cc0-9430-38a7a0b1f524"
-
-
 def upload_resume(
     db: Session,
-    file
+    file,
+    user_id
 ):
 
     started_at = perf_counter()
@@ -31,7 +28,7 @@ def upload_resume(
 
     s3_key = (
         f"resumes/"
-        f"{DUMMY_USER_ID}/"
+        f"{user_id}/"
         f"{uuid.uuid4()}_{file.filename}"
     )
 
@@ -66,7 +63,7 @@ def upload_resume(
 
     # Create resume row
     resume = Resume(
-        user_id=DUMMY_USER_ID,
+        user_id=user_id,
         filename=file.filename,
         s3_key=s3_key,
         extracted_text=extracted_text

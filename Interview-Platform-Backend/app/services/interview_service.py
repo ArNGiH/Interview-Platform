@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.agents.interview.agents.feedback_agent import (
@@ -7,9 +8,9 @@ from app.core.logger import logger
 from app.models.interview_feedback import InterviewFeedback
 from app.models.interview_message import InterviewMessage
 from app.models.interview_session import InterviewSession
+from app.models.resume import Resume
 from app.schemas.interview_schema import InterviewSetupRequest
 
-DUMMY_USER_ID = "fb341b60-f05b-4cc0-9430-38a7a0b1f524"
 INTERVIEW_STATUS_ACTIVE = "active"
 INTERVIEW_STATUS_SUBMITTED = "submitted"
 
@@ -65,15 +66,32 @@ def generate_system_prompt(
 
 def create_interview_session(
     db: Session,
-    interview_data: InterviewSetupRequest
+    interview_data: InterviewSetupRequest,
+    user_id
 ):
 
     system_prompt = generate_system_prompt(
         interview_data
     )
 
+    if interview_data.resume_id:
+        resume = (
+            db.query(Resume)
+            .filter(
+                Resume.id == interview_data.resume_id,
+                Resume.user_id == user_id
+            )
+            .first()
+        )
+
+        if not resume:
+            raise HTTPException(
+                status_code=404,
+                detail="Resume not found"
+            )
+
     interview_session = InterviewSession(
-        user_id=DUMMY_USER_ID,
+        user_id=user_id,
         role=interview_data.role,
         experience_level=interview_data.experience_level,
         resume_id=interview_data.resume_id,
@@ -166,13 +184,14 @@ def serialize_interview_session(
 
 def list_interview_sessions(
     db: Session,
+    user_id,
     status: str | None = None
 ):
 
     query = (
         db.query(InterviewSession)
         .filter(
-            InterviewSession.user_id == DUMMY_USER_ID
+            InterviewSession.user_id == user_id
         )
     )
 
@@ -208,20 +227,23 @@ def list_interview_sessions(
 
 def get_interview_history(
     db: Session,
-    interview_id: str
+    interview_id: str,
+    user_id
 ):
 
     interview_session = (
         db.query(InterviewSession)
         .filter(
-            InterviewSession.id == interview_id
+            InterviewSession.id == interview_id,
+            InterviewSession.user_id == user_id
         )
         .first()
     )
 
     if not interview_session:
-        raise Exception(
-            "Interview session not found"
+        raise HTTPException(
+            status_code=404,
+            detail="Interview session not found"
         )
 
     messages = (
@@ -268,8 +290,24 @@ def get_interview_history(
 
 def get_interview_feedback(
     db: Session,
-    interview_id: str
+    interview_id: str,
+    user_id
 ):
+
+    interview_session = (
+        db.query(InterviewSession)
+        .filter(
+            InterviewSession.id == interview_id,
+            InterviewSession.user_id == user_id
+        )
+        .first()
+    )
+
+    if not interview_session:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview session not found"
+        )
 
     interview_feedback = (
         db.query(InterviewFeedback)
@@ -286,20 +324,23 @@ def get_interview_feedback(
 
 def submit_interview_session(
     db: Session,
-    interview_id: str
+    interview_id: str,
+    user_id
 ):
 
     interview_session = (
         db.query(InterviewSession)
         .filter(
-            InterviewSession.id == interview_id
+            InterviewSession.id == interview_id,
+            InterviewSession.user_id == user_id
         )
         .first()
     )
 
     if not interview_session:
-        raise Exception(
-            "Interview session not found"
+        raise HTTPException(
+            status_code=404,
+            detail="Interview session not found"
         )
 
     messages = (

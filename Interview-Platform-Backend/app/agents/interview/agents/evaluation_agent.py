@@ -16,6 +16,10 @@ from app.agents.interview.state import (
     InterviewState
 )
 
+from app.agents.interview.schemas import (
+    CandidateEvaluationOutput
+)
+
 from app.services.llm_service import (
     get_llm
 )
@@ -23,13 +27,16 @@ from app.services.llm_service import (
 from app.agents.interview.agents.common import (
     compact_for_log,
     is_behavioral_interview,
-    usage_metadata
+    normalize_structured_output,
 )
 
 
 EVALUATION_AGENT_NAME = "Evaluation Agent"
 
 llm = get_llm()
+structured_llm = llm.with_structured_output(
+    CandidateEvaluationOutput
+)
 
 
 def evaluate_candidate_answer_node(
@@ -86,7 +93,7 @@ def evaluate_candidate_answer_node(
 
     try:
 
-        response = llm.invoke(
+        raw_response = structured_llm.invoke(
             [
                 SystemMessage(
                     content=prompt
@@ -97,6 +104,10 @@ def evaluate_candidate_answer_node(
                     )
                 )
             ]
+        )
+        response = normalize_structured_output(
+            raw_response,
+            CandidateEvaluationOutput
         )
 
     except Exception:
@@ -114,31 +125,38 @@ def evaluate_candidate_answer_node(
 
         raise
 
-    evaluation = response.content
+    evaluation = response.model_copy(
+        update={
+            "question": previous_question,
+            "answer": latest_user_message
+        }
+    )
 
-    state["candidate_evaluation"] = {
-        "question": previous_question,
-        "answer": latest_user_message,
-        "evaluation": evaluation
-    }
+    state["candidate_evaluation"] = evaluation
 
     logger.info(
         (
             "candidate_answer_evaluated "
             "question_count=%s "
-            "response_chars=%s "
+            "confidence=%s "
+            "user_intent=%s "
+            "needs_clarification=%s "
+            "should_probe_deeper=%s "
             "duration_ms=%s "
-            "usage=%s "
-            "evaluation_preview=%s"
+            "evaluation=%s"
         ),
         state.get(
             "question_count",
             0
         ),
-        len(evaluation or ""),
+        evaluation.confidence,
+        evaluation.user_intent,
+        evaluation.needs_clarification,
+        evaluation.should_probe_deeper,
         int((perf_counter() - started_at) * 1000),
-        usage_metadata(response),
-        compact_for_log(evaluation)
+        compact_for_log(
+            str(evaluation.model_dump())
+        )
     )
 
     return state

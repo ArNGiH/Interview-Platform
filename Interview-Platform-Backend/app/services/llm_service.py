@@ -31,5 +31,6 @@ def get_llm():
         api_key=AZURE_OPENAI_API_KEY,
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
         azure_deployment=AZURE_OPENAI_DEPLOYMENT,
-        api_version=AZURE_OPENAI_API_VERSION
+        api_version=AZURE_OPENAI_API_VERSION,
+        streaming=True,
     )

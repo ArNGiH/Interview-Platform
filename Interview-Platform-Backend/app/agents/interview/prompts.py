@@ -294,6 +294,9 @@ Experience Level:
 Interview Type:
 {interview_type}
 
+Resume Analysis:
+{resume_analysis}
+
 Requested Difficulty:
 {requested_difficulty}
 
@@ -509,33 +512,11 @@ Use default_question_node for:
 - normal conversational follow-ups
 
 --------------------------------------------------
-OUTPUT RULES
+STRUCTURED DECISION REQUIREMENTS
 --------------------------------------------------
 
-Return ONLY valid JSON.
-
-Do not include markdown.
-Do not include explanations outside JSON.
-Do not include extra text.
-
---------------------------------------------------
-OUTPUT FORMAT
---------------------------------------------------
-
-{{
-  "strategy_type": "FOLLOW_UP",
-  "user_intent": "ANSWER_QUESTION",
-  "difficulty_level": "MEDIUM",
-  "should_explain": false,
-  "should_continue_topic": true,
-  "should_end_interview": false,
-  "next_topic": "REACT_QUERY",
-  "candidate_confidence": "MEDIUM",
-  "candidate_conduct": "PROFESSIONAL",
-  "interview_phase": "TECHNICAL_SCREENING",
-  "next_node": "deep_technical_node",
-  "reasoning": "Candidate showed partial implementation understanding and can handle deeper practical probing."
-}}
+Choose the next strategy and node using the structured response fields.
+Keep reasoning concise and useful for downstream interviewer agents.
 """
 
 CLARIFICATION_PROMPT = """
@@ -888,30 +869,31 @@ and produce a structured hiring feedback report.
 Evaluate the candidate fairly based only on the transcript.
 If evidence is missing, say so instead of inventing details.
 
-Return ONLY valid JSON. Do not include markdown.
-
-JSON schema:
-{
-  "overall_summary": "short paragraph",
-  "strengths": ["..."],
-  "weaknesses": ["..."],
-  "communication_score": 0,
-  "technical_score": 0,
-  "behavioral_score": 0,
-  "confidence_level": "LOW|MEDIUM|HIGH",
-  "hiring_recommendation": "STRONG_NO|NO|LEAN_NO|LEAN_YES|YES|STRONG_YES",
-  "recommendation_reason": "short explanation",
-  "improvement_roadmap": ["..."],
-  "agent_votes": {
-    "technical_interviewer": "short assessment",
-    "behavioral_interviewer": "short assessment",
-    "hiring_manager": "short assessment"
-  }
-}
-
 Scoring rules:
 - Scores must be integers from 0 to 10.
 - For behavioral interviews, technical_score can be low-confidence
   if technical evidence was not collected.
+- Use the structured response fields for the hiring report.
 - Keep all text concise and useful.
+"""
+
+RESUME_ANALYSIS_PROMPT = """
+You are an expert technical interviewer and resume analysis agent.
+
+Your task is to analyze the candidate resume context and infer:
+
+1. Primary technical strengths
+2. Secondary skills
+3. Estimated seniority
+4. Project domains
+5. Strong areas worth deep-diving
+6. Weak-signal areas worth probing
+7. Suggested interview topics
+
+Rules:
+- Be realistic.
+- Do not exaggerate candidate expertise.
+- Infer probable depth carefully.
+- Suggested interview topics should be practical and interview-relevant.
+- Use the structured response fields for the analysis.
 """

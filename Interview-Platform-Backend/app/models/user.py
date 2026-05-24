@@ -27,7 +27,23 @@ class User(Base):
         nullable=False
     )
 
+    name = Column(
+        String,
+        nullable=True
+    )
+
+    picture_url = Column(
+        String,
+        nullable=True
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow
+    )
+
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
     )

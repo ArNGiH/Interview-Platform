@@ -4,6 +4,8 @@ from fastapi import File
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.auth import CurrentUser
+from app.core.auth import get_current_user
 from app.core.dependencies import get_db
 
 from app.services.resume_service import (
@@ -19,12 +21,14 @@ router = APIRouter(
 @router.post("/upload")
 def upload_resume_api(
     file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
 
     resume = upload_resume(
         db=db,
-        file=file
+        file=file,
+        user_id=current_user.id
     )
 
     return {

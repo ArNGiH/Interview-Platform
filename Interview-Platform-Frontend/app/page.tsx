@@ -1,16 +1,54 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { HomeHealth } from "@/components/HomeHealth";
+import { getUserInfo } from "@/utils/api/user";
+import type { UserInfoResponse } from "@/types/api";
 
 export default function HomePage() {
+  const [user, setUser] = useState<UserInfoResponse | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getUserInfo()
+      .then((response) => {
+        if (isMounted) {
+          setUser(response);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setUser(null);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const displayName = useMemo(() => {
+    return user?.name || user?.email?.split("@")[0] || "there";
+  }, [user]);
+
   return (
     <main className="page">
       <section className="hero-grid">
         <div>
-          <p className="eyebrow">Resume-aware technical interviews</p>
-          <h1 className="hero-title">Run sharper interviews without losing the human signal.</h1>
+          <p className="eyebrow">
+            Resume-aware technical interviews
+          </p>
+          <h1 className="hero-title">
+            {user
+              ? `Welcome back, ${displayName}.`
+              : "Run sharper interviews without losing the human signal."}
+          </h1>
           <p className="hero-copy">
-            Upload a resume, configure the round, and conduct an AI-guided interview that adapts
-            to the candidate&apos;s answers, role, difficulty, and project background.
+            {user
+              ? "Your interview workspace is ready. Start a new resume-aware round or continue reviewing previous sessions tied to your account."
+              : "Upload a resume, configure the round, and conduct an AI-guided interview that adapts to the candidate's answers, role, difficulty, and project background."}
           </p>
 
           <div className="hero-actions">
