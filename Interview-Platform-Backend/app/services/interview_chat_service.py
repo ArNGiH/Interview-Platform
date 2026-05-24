@@ -1,5 +1,6 @@
 import json
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.core.logger import logger
 from app.models.interview_session import InterviewSession
@@ -24,7 +25,8 @@ def _stream_token(token: str):
 async def continue_interview_chat(
     db: Session,
     interview_id: str,
-    user_message: str
+    user_message: str,
+    user_id
 ):
 
     logger.info(
@@ -35,7 +37,8 @@ async def continue_interview_chat(
     interview_session = (
         db.query(InterviewSession)
         .filter(
-            InterviewSession.id == interview_id
+            InterviewSession.id == interview_id,
+            InterviewSession.user_id == user_id
         )
         .first()
     )
@@ -47,8 +50,9 @@ async def continue_interview_chat(
             interview_id
         )
 
-        raise Exception(
-            "Interview session not found"
+        raise HTTPException(
+            status_code=404,
+            detail="Interview session not found"
         )
 
     if interview_session.status == "submitted":
@@ -59,8 +63,9 @@ async def continue_interview_chat(
             ),
             interview_id
         )
-        raise Exception(
-            "Interview has already been submitted"
+        raise HTTPException(
+            status_code=409,
+            detail="Interview has already been submitted"
         )
 
     existing_messages = (

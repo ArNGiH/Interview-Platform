@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { UserMenu } from "@/components/UserMenu";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -36,6 +37,7 @@ export default function RootLayout({
                 <Link className="button button-secondary" href="/setup">
                   New interview
                 </Link>
+                <UserMenu />
               </nav>
             </div>
           </header>

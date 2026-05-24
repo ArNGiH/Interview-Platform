@@ -10,6 +10,14 @@ export type ApiHealthResponse = {
   status: string;
 };
 
+export type UserInfoResponse = {
+  id: string;
+  email: string;
+  name: string | null;
+  picture_url: string | null;
+  is_authenticated: boolean;
+};
+
 export type ResumeUploadResponse = {
   resume_id: string;
   filename: string;
