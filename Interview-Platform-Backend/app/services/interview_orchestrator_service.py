@@ -1,7 +1,9 @@
 import json
 
 from sqlalchemy.orm import Session
-
+from app.services.langfuse_service import (
+    agent_observation
+)
 from fastapi import HTTPException
 
 from app.core.logger import logger
@@ -56,7 +58,7 @@ async def start_interview(
         logger.error(
             (
                 "interview_session_not_found "
-                "interview_id=%s"
+                               "interview_id=%s"
             ),
             interview_id
         )
@@ -81,133 +83,168 @@ async def start_interview(
             detail="Interview has already been submitted"
         )
 
-    initial_state = {
-
-        "interview_id": str(
-            interview_session.id
-        ),
-
-        "interview_role": (
-            interview_session.role
-        ),
-
-        "difficulty": (
-            interview_session.difficulty
-        ),
-
-        "experience_level": (
-            interview_session.experience_level
-        ),
-
-        "interview_type": (
-            interview_session.interview_type
-        ),
-
-        "interview_mode": (
-            interview_session.interview_mode
-        ),
-
-        "system_prompt": (
-            interview_session.system_prompt
-        ),
-
-        "messages": [],
-
-        "resume_id": (
-            str(interview_session.resume_id)
-            if interview_session.resume_id
-            else None
-        ),
-
-        "retrieved_chunks": [],
-
-        "latest_user_message": "",
-
-        "current_question": None,
-
-        "question_count": 0,
-
-        "streaming_prompt": None,
-
-        "streaming_instruction": None
-    }
-
-    config = {
-        "configurable": {
-            "thread_id": str(
-                interview_session.id
+    with agent_observation(
+        name="Interview Start",
+        input_data={
+            "interview_id": interview_id,
+            "user_id": str(user_id),
+            "role": interview_session.role,
+            "difficulty": interview_session.difficulty,
+            "interview_type": interview_session.interview_type,
+            "experience_level": (
+                interview_session.experience_level
+            ),
+            "interview_mode": (
+                interview_session.interview_mode
             )
         }
-    }
+    ) as observation:
 
-    logger.info(
-        (
-            "invoking_interview_graph "
-            "interview_id=%s"
-        ),
-        interview_id
-    )
+        initial_state = {
 
-    interview_graph = (
-        build_start_interview_graph(
-            db=db
+            "interview_id": str(
+                interview_session.id
+            ),
+
+            "interview_role": (
+                interview_session.role
+            ),
+
+            "difficulty": (
+                interview_session.difficulty
+            ),
+
+            "experience_level": (
+                interview_session.experience_level
+            ),
+
+            "interview_type": (
+                interview_session.interview_type
+            ),
+
+            "interview_mode": (
+                interview_session.interview_mode
+            ),
+
+            "system_prompt": (
+                interview_session.system_prompt
+            ),
+
+            "messages": [],
+
+            "resume_id": (
+                str(interview_session.resume_id)
+                if interview_session.resume_id
+                else None
+            ),
+
+            "retrieved_chunks": [],
+
+            "latest_user_message": "",
+
+            "current_question": None,
+
+            "question_count": 0,
+
+            "streaming_prompt": None,
+
+            "streaming_instruction": None
+        }
+
+        config = {
+            "configurable": {
+                "thread_id": str(
+                    interview_session.id
+                )
+            }
+        }
+
+        logger.info(
+            (
+                "invoking_interview_graph "
+                "interview_id=%s"
+            ),
+            interview_id
         )
-    )
 
-    final_state = (
-        interview_graph.invoke(
-            initial_state,
-            config=config
-        )
-    )
+        try:
 
-    streaming_prompt = final_state.get(
-        "streaming_prompt"
-    )
+            interview_graph = (
+                build_start_interview_graph(
+                    db=db
+                )
+            )
 
-    streaming_instruction = final_state.get(
-        "streaming_instruction"
-    )
+            final_state = (
+                interview_graph.invoke(
+                    initial_state,
+                    config=config
+                )
+            )
 
-    if not streaming_prompt:
+            streaming_prompt = final_state.get(
+                "streaming_prompt"
+            )
 
-        raise Exception(
-            "Streaming prompt missing from graph state"
-        )
+            streaming_instruction = final_state.get(
+                "streaming_instruction"
+            )
 
-    full_response = ""
+            if not streaming_prompt:
 
-    async for token in astream_interviewer_turn(
-        streaming_prompt,
-        streaming_instruction
-    ):
+                raise Exception(
+                    "Streaming prompt missing from graph state"
+                )
 
-        full_response += token
+            full_response = ""
 
-        yield _stream_token(token)
+            async for token in astream_interviewer_turn(
+                streaming_prompt,
+                streaming_instruction
+            ):
 
-    final_state["current_question"] = (
-        full_response
-    )
+                full_response += token
 
-    append_assistant_response(
-        final_state,
-        full_response
-    )
+                yield _stream_token(token)
 
-    persist_interview_state_node(
-        final_state,
-        db
-    )
+            final_state["current_question"] = (
+                full_response
+            )
 
-    logger.info(
-        (
-            "interview_graph_completed "
-            "interview_id=%s "
-            "question_count=%s"
-        ),
-        interview_id,
-        final_state.get(
-            "question_count"
-        )
-    )
+            append_assistant_response(
+                final_state,
+                full_response
+            )
+
+            persist_interview_state_node(
+                final_state,
+                db
+            )
+
+            observation.update(
+                output={
+                    "question_count": final_state.get(
+                        "question_count"
+                    ),
+                    "response_length": len(
+                        full_response
+                    )
+                }
+            )
+            observation.end()
+
+            logger.info(
+                (
+                    "interview_graph_completed "
+                    "interview_id=%s "
+                    "question_count=%s"
+                ),
+                interview_id,
+                final_state.get(
+                    "question_count"
+                )
+            )
+
+        except Exception:
+
+            raise

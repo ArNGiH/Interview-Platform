@@ -8,33 +8,6 @@ from pydantic import BaseModel
 from app.agents.interview.state import InterviewState
 from app.core.logger import logger
 
-
-BEHAVIORAL_TECHNICAL_LEAK_TERMS = (
-    "implemented",
-    "implement it",
-    "technical choices",
-    "technical choice",
-    "code-splitting",
-    "lazy-loading",
-    "api calls",
-    "ci/cd",
-    "feature flag",
-    "rollback",
-    "observability",
-    "metrics",
-    "architecture",
-    "system design",
-    "database",
-    "algorithm",
-    "debugging",
-    "performance optimization",
-    "scalability",
-    "api details",
-    "framework",
-    "trade-offs",
-    "tradeoffs",
-)
-
 LLM_LOG_OUTPUT_CHARS = int(os.getenv("LLM_LOG_OUTPUT_CHARS", "0"))
 
 
@@ -105,15 +78,6 @@ def is_behavioral_interview(state: InterviewState):
     return (state.get("interview_type", "") or "").lower() == "behavioral"
 
 
-def has_behavioral_technical_leak(text: str | None):
-    lowered_text = (text or "").lower()
-
-    return any(
-        term in lowered_text
-        for term in BEHAVIORAL_TECHNICAL_LEAK_TERMS
-    )
-
-
 def fallback_behavioral_question():
     return (
         "What was the reason behind that decision, "
@@ -174,19 +138,3 @@ def log_agent_output(
     )
 
 
-# Backward-compatible aliases used by older code paths during migration.
-_append_assistant_response = append_assistant_response
-_compact_for_log = compact_for_log
-_fallback_behavioral_question = fallback_behavioral_question
-_has_behavioral_technical_leak = has_behavioral_technical_leak
-_is_behavioral_interview = is_behavioral_interview
-_log_node_output = lambda node_name, state, response, started_at, output_override=None: log_agent_output(
-    "Interview Workflow",
-    node_name,
-    state,
-    response,
-    started_at,
-    output_override=output_override,
-)
-_state_upper = state_upper
-_usage_metadata = usage_metadata

@@ -4,10 +4,21 @@ from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 
 from app.core.logger import logger
-from app.agents.interview.agents.common import normalize_structured_output
-from app.agents.interview.prompts import FEEDBACK_AGENT_PROMPT
-from app.agents.interview.schemas import FeedbackReportOutput
-from app.services.llm_service import get_llm
+from app.agents.interview.agents.common import (
+    normalize_structured_output
+)
+from app.agents.interview.prompts import (
+    FEEDBACK_AGENT_PROMPT
+)
+from app.agents.interview.schemas import (
+    FeedbackReportOutput
+)
+from app.services.llm_service import (
+    get_llm
+)
+from app.services.langfuse_service import (
+    agent_observation
+)
 
 
 FEEDBACK_AGENT_NAME = "Feedback Agent"
@@ -40,9 +51,15 @@ def _fallback_feedback_report():
             "Retry feedback generation after verifying model availability."
         ],
         "agent_votes": {
-            "technical_interviewer": "Not enough reliable feedback generated.",
-            "behavioral_interviewer": "Not enough reliable feedback generated.",
-            "hiring_manager": "Not enough reliable feedback generated."
+            "technical_interviewer": (
+                "Not enough reliable feedback generated."
+            ),
+            "behavioral_interviewer": (
+                "Not enough reliable feedback generated."
+            ),
+            "hiring_manager": (
+                "Not enough reliable feedback generated."
+            )
         }
     }
 
@@ -73,44 +90,80 @@ def generate_interview_feedback_report(
     {transcript}
     """
 
-    try:
-        report = normalize_structured_output(
-            structured_llm.invoke(
-                [
-                    SystemMessage(
-                        content=FEEDBACK_AGENT_PROMPT
-                    ),
-                    HumanMessage(
-                        content=prompt
-                    )
-                ]
+    with agent_observation(
+        name="Feedback Generation",
+        input_data={
+            "interview_id": str(
+                interview_session.id
             ),
-            FeedbackReportOutput
-        )
-
-        logger.info(
-            (
-                "feedback_agent_completed "
-                "interview_id=%s "
-                "recommendation=%s "
-                "confidence=%s "
-                "duration_ms=%s"
+            "role": interview_session.role,
+            "experience_level": (
+                interview_session.experience_level
             ),
-            interview_session.id,
-            report.hiring_recommendation,
-            report.confidence_level,
-            int((perf_counter() - started_at) * 1000),
-        )
-
-        return report.model_dump()
-
-    except Exception:
-        logger.exception(
-            (
-                "feedback_agent_failed "
-                "interview_id=%s"
+            "difficulty": (
+                interview_session.difficulty
             ),
-            interview_session.id
-        )
+            "interview_type": (
+                interview_session.interview_type
+            ),
+            "interview_mode": (
+                interview_session.interview_mode
+            ),
+            "message_count": len(messages)
+        }
+    ) as observation:
 
-        return _fallback_feedback_report()
+        try:
+
+            report = normalize_structured_output(
+                structured_llm.invoke(
+                    [
+                        SystemMessage(
+                            content=FEEDBACK_AGENT_PROMPT
+                        ),
+                        HumanMessage(
+                            content=prompt
+                        )
+                    ]
+                ),
+                FeedbackReportOutput
+            )
+
+            logger.info(
+                (
+                    "feedback_agent_completed "
+                    "interview_id=%s "
+                    "recommendation=%s "
+                    "confidence=%s "
+                    "duration_ms=%s"
+                ),
+                interview_session.id,
+                report.hiring_recommendation,
+                report.confidence_level,
+                int(
+                    (
+                        perf_counter()
+                        - started_at
+                    ) * 1000
+                ),
+            )
+
+            observation.update(
+                output=report.model_dump()
+            )
+            observation.end()
+
+            return report.model_dump()
+
+        except Exception as ex:
+
+
+            logger.exception(
+                (
+                    "feedback_agent_failed "
+                    "interview_id=%s"
+                ),
+                interview_session.id
+            )
+
+            return _fallback_feedback_report()

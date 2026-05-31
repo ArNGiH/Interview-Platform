@@ -1,5 +1,4 @@
 from time import perf_counter
-
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from pgvector.sqlalchemy import Vector
