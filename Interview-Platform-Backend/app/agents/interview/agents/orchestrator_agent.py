@@ -4,6 +4,9 @@ from langchain_core.messages import (
     SystemMessage,
     HumanMessage
 )
+from app.services.langfuse_service import (
+    agent_observation
+)
 
 from app.core.logger import logger
 
@@ -61,6 +64,7 @@ def question_strategy_node(
     candidate_answer = (
         structured_get(candidate_evaluation, "answer", "")
     )
+
     resume_analysis = state.get(
         "resume_analysis"
     )
@@ -84,7 +88,9 @@ def question_strategy_node(
             "difficulty",
             "medium"
         ),
-        resume_analysis=model_dump_for_prompt(resume_analysis),
+        resume_analysis=model_dump_for_prompt(
+            resume_analysis
+        ),
         question_count=state.get(
             "question_count",
             0
@@ -94,42 +100,82 @@ def question_strategy_node(
         evaluation=evaluation_text
     )
 
-    try:
-
-        raw_strategy_response = structured_llm.invoke(
-            [
-                SystemMessage(
-                    content=prompt
-                ),
-                HumanMessage(
-                    content=(
-                        "Determine the next "
-                        "interview strategy."
-                    )
-                )
-            ]
-        )
-        strategy_response = normalize_structured_output(
-            raw_strategy_response,
-            QuestionStrategyOutput
-        )
-
-    except Exception:
-
-        logger.exception(
-            (
-                "question_strategy_generation_failed "
-                "question_count=%s"
+    with agent_observation(
+        name="Question Strategy",
+        input_data={
+            "interview_role": state.get(
+                "interview_role",
+                "Software Engineer"
             ),
-            state.get(
+            "experience_level": state.get(
+                "experience_level",
+                "mid-level"
+            ),
+            "interview_type": state.get(
+                "interview_type",
+                "technical"
+            ),
+            "difficulty": state.get(
+                "difficulty",
+                "medium"
+            ),
+            "question_count": state.get(
                 "question_count",
                 0
+            ),
+            "previous_question": previous_question,
+            "candidate_answer": candidate_answer,
+            "evaluation": evaluation_text
+        }
+    ) as observation:
+
+        try:
+
+            raw_strategy_response = structured_llm.invoke(
+                [
+                    SystemMessage(
+                        content=prompt
+                    ),
+                    HumanMessage(
+                        content=(
+                            "Determine the next "
+                            "interview strategy."
+                        )
+                    )
+                ]
             )
-        )
 
-        raise
+            strategy_response = (
+                normalize_structured_output(
+                    raw_strategy_response,
+                    QuestionStrategyOutput
+                )
+            )
 
-    state["question_strategy"] = strategy_response
+            observation.update(
+                output=strategy_response.model_dump()
+            )
+            observation.end()
+
+        except Exception as ex:
+
+
+            logger.exception(
+                (
+                    "question_strategy_generation_failed "
+                    "question_count=%s"
+                ),
+                state.get(
+                    "question_count",
+                    0
+                )
+            )
+
+            raise
+
+    state["question_strategy"] = (
+        strategy_response
+    )
 
     logger.info(
         (
@@ -154,9 +200,16 @@ def question_strategy_node(
         strategy_response.should_explain,
         strategy_response.should_end_interview,
         strategy_response.next_node,
-        int((perf_counter() - started_at) * 1000),
+        int(
+            (
+                perf_counter()
+                - started_at
+            ) * 1000
+        ),
         compact_for_log(
-            str(strategy_response.model_dump())
+            str(
+                strategy_response.model_dump()
+            )
         )
     )
 

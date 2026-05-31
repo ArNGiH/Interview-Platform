@@ -24,6 +24,10 @@ from app.services.llm_service import (
     get_llm
 )
 
+from app.services.langfuse_service import (
+    agent_observation
+)
+
 from app.agents.interview.agents.common import (
     compact_for_log,
     is_behavioral_interview,
@@ -34,6 +38,7 @@ from app.agents.interview.agents.common import (
 EVALUATION_AGENT_NAME = "Evaluation Agent"
 
 llm = get_llm()
+
 structured_llm = llm.with_structured_output(
     CandidateEvaluationOutput
 )
@@ -91,39 +96,61 @@ def evaluate_candidate_answer_node(
     Analyze the candidate response.
     """
 
-    try:
-
-        raw_response = structured_llm.invoke(
-            [
-                SystemMessage(
-                    content=prompt
-                ),
-                HumanMessage(
-                    content=(
-                        "Evaluate the candidate response."
-                    )
-                )
-            ]
-        )
-        response = normalize_structured_output(
-            raw_response,
-            CandidateEvaluationOutput
-        )
-
-    except Exception:
-
-        logger.exception(
-            (
-                "candidate_answer_evaluation_failed "
-                "question_count=%s"
+    with agent_observation(
+        name="Candidate Evaluation",
+        input_data={
+            "interview_type": state.get(
+                "interview_type",
+                "technical"
             ),
-            state.get(
-                "question_count",
-                0
-            )
-        )
+            "difficulty": state.get(
+                "difficulty",
+                "medium"
+            ),
+            "previous_question": previous_question,
+            "candidate_answer": latest_user_message,
+        }
+    ) as observation:
 
-        raise
+        try:
+
+            raw_response = structured_llm.invoke(
+                [
+                    SystemMessage(
+                        content=prompt
+                    ),
+                    HumanMessage(
+                        content=(
+                            "Evaluate the candidate response."
+                        )
+                    )
+                ]
+            )
+
+            response = normalize_structured_output(
+                raw_response,
+                CandidateEvaluationOutput
+            )
+
+            observation.update(
+                output=response.model_dump()
+            )
+            observation.end()
+
+        except Exception as ex:
+
+            logger.exception(
+                (
+                    "candidate_answer_evaluation_failed "
+                    "question_count=%s"
+                ),
+                state.get(
+                    "question_count",
+                    0
+                )
+            )
+
+            raise
 
     evaluation = response.model_copy(
         update={
@@ -132,7 +159,9 @@ def evaluate_candidate_answer_node(
         }
     )
 
-    state["candidate_evaluation"] = evaluation
+    state["candidate_evaluation"] = (
+        evaluation
+    )
 
     logger.info(
         (
@@ -153,9 +182,16 @@ def evaluate_candidate_answer_node(
         evaluation.user_intent,
         evaluation.needs_clarification,
         evaluation.should_probe_deeper,
-        int((perf_counter() - started_at) * 1000),
+        int(
+            (
+                perf_counter()
+                - started_at
+            ) * 1000
+        ),
         compact_for_log(
-            str(evaluation.model_dump())
+            str(
+                evaluation.model_dump()
+            )
         )
     )
 

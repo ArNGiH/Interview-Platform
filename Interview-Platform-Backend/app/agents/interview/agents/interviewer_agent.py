@@ -5,6 +5,9 @@ from langchain_core.messages import (
     SystemMessage,
     HumanMessage
 )
+from app.services.langfuse_service import (
+    agent_observation
+)
 
 from app.core.logger import logger
 
@@ -34,7 +37,6 @@ from app.agents.interview.agents.common import (
     append_assistant_response,
     compact_for_log,
     fallback_behavioral_question,
-    has_behavioral_technical_leak,
     is_behavioral_interview,
     log_agent_output,
     model_dump_for_prompt,
@@ -53,31 +55,51 @@ async def astream_interviewer_turn(
     instruction: str
 ):
 
-    async for chunk in llm.astream(
-        [
-            SystemMessage(content=prompt),
-            HumanMessage(content=instruction)
-        ]
-    ):
+    with agent_observation(
+        name="Interviewer Response Generation",
+        input_data={
+            "instruction": instruction,
+            "prompt_chars": len(prompt)
+        }
+    ) as observation:
 
-        if chunk.content:
-            yield chunk.content
-            await asyncio.sleep(0)
+        full_response = ""
 
-def _invoke_interviewer_turn(
-    prompt: str,
-    instruction: str
-):
+        try:
 
-    response = llm.invoke(
-        [
-            SystemMessage(content=prompt),
-            HumanMessage(content=instruction)
-        ]
-    )
+            async for chunk in llm.astream(
+                [
+                    SystemMessage(
+                        content=prompt
+                    ),
+                    HumanMessage(
+                        content=instruction
+                    )
+                ]
+            ):
 
-    return response.content
+                if chunk.content:
 
+                    full_response += (
+                        chunk.content
+                    )
+
+                    yield chunk.content
+
+                    await asyncio.sleep(0)
+
+            observation.update(
+                output={
+                    "response_length": len(
+                        full_response
+                    )
+                }
+            )
+            observation.end()
+
+        except Exception:
+
+            raise
 
 def generate_interview_intro_node(
     state: InterviewState

@@ -10,6 +10,10 @@ from app.core.config import (
     AZURE_OPENAI_API_VERSION,
 )
 
+from app.services.langfuse_service import (
+    langfuse_handler
+)
+
 
 def get_llm():
 
@@ -33,4 +37,7 @@ def get_llm():
         azure_deployment=AZURE_OPENAI_DEPLOYMENT,
         api_version=AZURE_OPENAI_API_VERSION,
         streaming=True,
+        callbacks=[
+            langfuse_handler
+        ]
     )
