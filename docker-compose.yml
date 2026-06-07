@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
 
     environment:
-      NEXT_PUBLIC_SERVER_URL: http://localhost/api
+      NEXT_PUBLIC_SERVER_URL: /api
 
     depends_on:
       - backend
