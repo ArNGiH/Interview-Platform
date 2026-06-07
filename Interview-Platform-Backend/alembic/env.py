@@ -2,6 +2,17 @@ from logging.config import fileConfig
 import os
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+from dotenv import load_dotenv
+
+from alembic import context
+
+load_dotenv()
+
+database_url = os.getenv("DATABASE_URL")
+
+if not database_url:
+    raise RuntimeError("DATABASE_URL must be set to run Alembic migrations")
+
 from app.core.database import Base
 from app.models.user import User
 from app.models.interview_session import InterviewSession
@@ -10,15 +21,13 @@ from app.models.resume_chunk import ResumeChunk
 from app.models.interview_message import InterviewMessage
 from app.models.interview_feedback import InterviewFeedback
 
-from alembic import context
-
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
 config.set_main_option(
     "sqlalchemy.url",
-    os.getenv("DATABASE_URL")
+    database_url
 )
 
 # Interpret the config file for Python logging.
